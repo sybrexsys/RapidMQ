@@ -5,7 +5,6 @@ TODO: for empty list skip size of theindex file
 */
 
 import (
-	"github.com/sybrexsys/RapidMQ/logging"
 	"runtime"
 	"sync"
 	"time"
@@ -48,7 +47,7 @@ type Queue struct {
 	totalWorkers uint16
 	workers      chan QueueWorker
 	tmpworkers   chan QueueWorker
-	log          logging.Logging
+	log          Logging
 	newMessage   chan struct{}
 	stopEvent    chan struct{}
 	stopedHandle chan struct{}
@@ -62,7 +61,7 @@ type newMessageNotificator interface {
 	newMessageNotification()
 }
 
-func CreateQueue(Name, StoragePath string, Log logging.Logging, Reader QueueWorker, Options *QueueOptions) (*Queue, error) {
+func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Options *QueueOptions) (*Queue, error) {
 	if Reader == nil {
 		Reader = &nullReader{}
 	}
@@ -70,7 +69,7 @@ func CreateQueue(Name, StoragePath string, Log logging.Logging, Reader QueueWork
 		Options = &DefaultQueueOptions
 	}
 	if Log == nil {
-		z := logging.NullLog(0)
+		z := nullLog(0)
 		Log = z
 	}
 	Log.Info("[Q:%s] is created...", Name)

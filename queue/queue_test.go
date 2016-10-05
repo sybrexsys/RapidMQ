@@ -1,12 +1,13 @@
 package queue
 
 import (
-	"github.com/sybrexsys/RapidMQ/logging"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/sybrexsys/RapidMQ/queue/internal/logging"
 )
 
 const (

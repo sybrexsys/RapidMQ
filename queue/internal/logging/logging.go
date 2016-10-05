@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-type Logging interface {
-	Trace(msg string, a ...interface{})
-	Info(msg string, a ...interface{})
-	Warning(msg string, a ...interface{})
-	Error(msg string, a ...interface{})
-}
 
 const (
 	logComMessage = iota
@@ -221,18 +215,4 @@ func (logger StdLog) Error(msg string, a ...interface{}) {
 func (logger StdLog) Info(msg string, a ...interface{}) {
 	m := addPrefix(logInfoTypeInfo, msg, a...)
 	log.Println(m)
-}
-
-type NullLog int
-
-func (logger NullLog) Trace(msg string, a ...interface{}) {
-}
-
-func (logger NullLog) Warning(msg string, a ...interface{}) {
-}
-
-func (logger NullLog) Error(msg string, a ...interface{}) {
-}
-
-func (logger NullLog) Info(msg string, a ...interface{}) {
 }

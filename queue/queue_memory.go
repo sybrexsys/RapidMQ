@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"github.com/sybrexsys/RapidMQ/logging"
 	"sync"
 	"time"
 )
@@ -25,15 +24,15 @@ type queueMemory struct {
 	size    int32
 	list    []*queueMemoryItem
 	putter  storagePutter
-	log     logging.Logging
+	log     Logging
 	timeout time.Duration
 	notify  newMessageNotificator
 }
 
 func createMemoryQueue(Name string, MaxCount uint16, MaxSize int32,
-	Putter storagePutter, Log logging.Logging, TimeOut time.Duration, Notify newMessageNotificator) *queueMemory {
+	Putter storagePutter, Log Logging, TimeOut time.Duration, Notify newMessageNotificator) *queueMemory {
 	if Log == nil {
-		Log = logging.NullLog(0)
+		Log = nullLog(0)
 	}
 	tmp := &queueMemory{
 		name:    Name,

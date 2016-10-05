@@ -1,8 +1,6 @@
 package queue
 
 import (
-	"github.com/sybrexsys/RapidMQ/logging"
-	"github.com/sybrexsys/RapidMQ/queue/internal/mmap"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
@@ -13,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/sybrexsys/RapidMQ/queue/internal/mmap"
 )
 
 var startTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -124,7 +124,7 @@ var (
 // fileStorage is struct for present disk storage of the data
 type fileStorage struct {
 	folder                    string                    // folder where locatd files of the storage
-	log                       logging.Logging           // log file for store information about actions
+	log                       Logging                   // log file for store information about actions
 	name                      string                    //name of then storage. At current time used for save to log file only
 	options                   *StorageOptions           // storage options
 	readMutex                 sync.RWMutex              // mutex for work with file handles for output from the sorage
@@ -659,10 +659,10 @@ func (fs *fileStorage) Put(buffer []byte) (StorageIdx, error) {
 }
 
 // createStorage creates new file storage
-func createStorage(StorageName, StorageLocation string, Log logging.Logging, Options *StorageOptions,
+func createStorage(StorageName, StorageLocation string, Log Logging, Options *StorageOptions,
 	TimeOut time.Duration, Notity newMessageNotificator) (*fileStorage, error) {
 	if Log == nil {
-		z := logging.NullLog(0)
+		z := nullLog(0)
 		Log = z
 	}
 	Log.Info("[fileStorage][%s] is created...", StorageName)
