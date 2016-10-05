@@ -343,7 +343,7 @@ func (q *Queue) close() {
 
 }
 
-func (q *Queue) Info() {
+func (q *Queue) info() {
 	q.storage.info()
 }
 
