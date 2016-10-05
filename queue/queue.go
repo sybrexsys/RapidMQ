@@ -5,7 +5,7 @@ TODO: for empty list skip size of theindex file
 */
 
 import (
-	"RapidMQ/logging"
+	"github.com/sybrexsys/RapidMQ/logging"
 	"runtime"
 	"sync"
 	"time"

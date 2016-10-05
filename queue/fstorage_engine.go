@@ -1,8 +1,8 @@
 package queue
 
 import (
-	"RapidMQ/logging"
-	"RapidMQ/queue/internal/mmap"
+	"github.com/sybrexsys/RapidMQ/logging"
+	"github.com/sybrexsys/RapidMQ/queue/internal/mmap"
 	"encoding/binary"
 	"errors"
 	"hash/crc32"

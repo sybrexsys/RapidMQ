@@ -427,7 +427,6 @@ func init() {
 	} else {
 		TestFolder = tmp + "queue/"
 		logFolder = tmp + "queue/log/"
-
 	}
 
 }

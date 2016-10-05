@@ -1,7 +1,7 @@
 package queue
 
 import (
-	"RapidMQ/logging"
+	"github.com/sybrexsys/RapidMQ/logging"
 	"math/rand"
 	"sync"
 	"sync/atomic"
