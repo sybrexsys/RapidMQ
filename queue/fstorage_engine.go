@@ -48,7 +48,6 @@ type StorageOptions struct {
 	FlushOperations                               uint32
 	PercentFreeForRecalculateOnExit               uint8
 	PercentFreeForRecalculateOnIncrementIndexFile uint8
-	CheckValidityDataRecord                       bool
 	SkipReturnedRecords                           bool
 	SkipDelayPerTry                               uint32
 	CheckCRCOnRead                                bool
@@ -61,7 +60,6 @@ var DefaultStorageOptions = StorageOptions{
 	FlushOperations:                               512,
 	PercentFreeForRecalculateOnExit:               5,
 	PercentFreeForRecalculateOnIncrementIndexFile: 10,
-	CheckValidityDataRecord:                       false,
 	SkipReturnedRecords:                           true,
 	SkipDelayPerTry:                               500,
 	CheckCRCOnRead:                                false,

@@ -157,7 +157,6 @@ func TestFillingData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
-	options.CheckValidityDataRecord = true
 	odd = 0
 	for z, _ := fs.Get(); err == nil; z, err = fs.Get() {
 		if TestStrings[odd] != string(z.Buffer) {
@@ -244,7 +243,6 @@ func TestFillDeleteUnusedDataFiles(t *testing.T) {
 	options := DefaultStorageOptions
 	options.MaxDataFileSize = 200000
 	options.CheckCRCOnRead = true
-	options.CheckValidityDataRecord = true
 	fs, err := createStorage("Test", TestFolder, nil, &options, 0, nil)
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
@@ -422,13 +420,14 @@ var TestFolder string
 var logFolder string
 
 func init() {
-	if runtime.GOOS == "darwin" {
-		TestFolder = "/Users/admin/gowork/test/storage/"
-		logFolder = "/Users/admin/gowork/test/storage/log/"
-	}
+	tmp := normalizeFilePath(os.TempDir())
 	if runtime.GOOS == "windows" {
-		TestFolder = "e:\\GoWork\\test\\queue\\"
-		logFolder = "e:\\GoWork\\test\\queue\\"
+		TestFolder = tmp + "queue\\"
+		logFolder = tmp + "queue\\log\\"
+	} else {
+		TestFolder = tmp + "queue/"
+		logFolder = tmp + "queue/log/"
+
 	}
 
 }
