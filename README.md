@@ -1,6 +1,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/sybrexsys/RapidMQ)](https://goreportcard.com/report/github.com/sybrexsys/RapidMQ)
 [![Build Status](https://travis-ci.org/sybrexsys/RapidMQ.svg?branch=master)](https://travis-ci.org/sybrexsys/RapidMQ)
 [![Coverage Status](https://coveralls.io/repos/github/sybrexsys/RapidMQ/badge.svg?branch=master)](https://coveralls.io/github/sybrexsys/RapidMQ?branch=master)
+[![GoDoc](https://godoc.org/github.com/sybrexsys/RapidMQ?status.png)](https://godoc.org/github.com/sybrexsys/RapidMQ)
 
 
 RapidMQ
