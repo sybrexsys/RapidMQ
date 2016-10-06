@@ -6,7 +6,6 @@ TODO: for empty list skip size of theindex file
 
 import (
 	"runtime"
-	"sync"
 	"time"
 )
 
@@ -40,7 +39,6 @@ type QueueItem struct {
 }
 
 type Queue struct {
-	sync.Mutex
 	total        int32
 	name         string
 	options      *QueueOptions
