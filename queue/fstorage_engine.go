@@ -42,29 +42,6 @@ const (
 	putRecordAsProcessedWithError
 )
 
-// StorageOptions is File storage options
-type StorageOptions struct {
-	MaxDataFileSize                               int64
-	FlushOperations                               uint32
-	PercentFreeForRecalculateOnExit               uint8
-	PercentFreeForRecalculateOnIncrementIndexFile uint8
-	SkipReturnedRecords                           bool
-	SkipDelayPerTry                               uint32
-	CheckCRCOnRead                                bool
-	MaxOneTimeOpenedFiles                         int16
-}
-
-// DefaultStorageOptions is Default options for filestorage
-var DefaultStorageOptions = StorageOptions{
-	MaxDataFileSize:                               0x1FFFFFFF, //
-	FlushOperations:                               512,
-	PercentFreeForRecalculateOnExit:               5,
-	PercentFreeForRecalculateOnIncrementIndexFile: 10,
-	SkipReturnedRecords:                           true,
-	SkipDelayPerTry:                               500,
-	CheckCRCOnRead:                                false,
-	MaxOneTimeOpenedFiles:                         12,
-}
 
 type storagePutter interface {
 	put(buffer []byte, option int) (StorageIdx, error)
@@ -291,7 +268,7 @@ func (fs *fileStorage) getNext() (*availableRecordInfo, error) {
 }
 
 // Get returns next available record from the storage
-func (fs *fileStorage) Get() (*QueueItem, error) {
+func (fs *fileStorage) Get() (*Message, error) {
 	var buf []byte
 
 	for {
@@ -304,7 +281,7 @@ func (fs *fileStorage) Get() (*QueueItem, error) {
 			fs.freeRecord(ai.Idx)
 			continue
 		}
-		tmp := &QueueItem{
+		tmp := &Message{
 			Buffer:  buf,
 			ID:      ai.ID,
 			idx:     ai.Idx,

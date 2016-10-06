@@ -104,7 +104,7 @@ func TestFillIncrementIndex(t *testing.T) {
 }
 
 func TestFillingData(t *testing.T) {
-	var z *QueueItem
+	var z *Message
 
 	clearTestFolder()
 	options := DefaultStorageOptions
@@ -188,7 +188,7 @@ func TestFillingData(t *testing.T) {
 }
 
 func TestWorkWithReleaseRecord(t *testing.T) {
-	var z *QueueItem
+	var z *Message
 	clearTestFolder()
 	fs, err := createStorage("Test", TestFolder, nil, nil, 0, nil)
 	if err != nil {
@@ -275,7 +275,7 @@ func TestFillDeleteUnusedDataFiles(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	var z *QueueItem
+	var z *Message
 	clearTestFolder()
 	fs, err := createStorage("Test", TestFolder, nil, nil, 0, nil)
 	if err != nil {

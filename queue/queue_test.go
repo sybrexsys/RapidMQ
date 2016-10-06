@@ -25,7 +25,7 @@ type nullReaderTestUnit struct {
 	isTimeOut        bool
 }
 
-func (n *nullReaderTestUnit) CreateClone() QueueWorker {
+func (n *nullReaderTestUnit) CreateClone() Worker {
 	return &nullReaderTestUnit{
 		id:               WorkerID(atomic.AddUint64((*uint64)(&n.id), 1) - 1),
 		changeStateCount: n.changeStateCount,
@@ -58,7 +58,7 @@ func (n *nullReaderTestUnit) isOk() bool {
 	return true
 }
 
-func (n *nullReaderTestUnit) ProcessMessage(q *Queue, msg *QueueItem, Next chan QueueWorker) {
+func (n *nullReaderTestUnit) ProcessMessage(q *Queue, msg *Message, Next chan Worker) {
 	time.Sleep(n.delay)
 	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 	if !n.isTimeOut {
@@ -68,7 +68,7 @@ func (n *nullReaderTestUnit) ProcessMessage(q *Queue, msg *QueueItem, Next chan 
 	q.log.Trace("[Q:%s] Worker (%d) ready for work", q.name, ID)
 }
 
-func (n *nullReaderTestUnit) ProcessTimeout(q *Queue, Next chan QueueWorker) {
+func (n *nullReaderTestUnit) ProcessTimeout(q *Queue, Next chan Worker) {
 	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 	q.Process(ID, n.isOk())
 	Next <- n
@@ -83,7 +83,7 @@ func (n *nullReaderTestUnit) NeedTimeoutProcessing() bool {
 	return n.isTimeOut
 }
 
-func WorkOptions(t *testing.T, kk int64, opt *QueueOptions, worker QueueWorker, withLoging bool) bool {
+func WorkOptions(t *testing.T, kk int64, opt *Options, worker Worker, withLoging bool) bool {
 	var (
 		log *logging.Logger
 		err error
@@ -153,8 +153,8 @@ loop:
 
 type testOptions struct {
 	kk      int64
-	worker  QueueWorker
-	options QueueOptions
+	worker  Worker
+	options Options
 	logging bool
 }
 

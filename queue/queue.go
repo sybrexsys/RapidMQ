@@ -1,57 +1,36 @@
+//Package queue contain methods and structures for managing of the message queue
 package queue
 
-/*
-TODO: for empty list skip size of theindex file
-*/
+//TODO: for empty list skip size of theindex file
 
 import (
 	"runtime"
 	"time"
 )
 
-type QueueOptions struct {
-	MinimunWorkersCount      uint16
-	MaximumWorkersCount      uint16
-	StorageOptions           *StorageOptions
-	MaximumMessagesPerWorker uint16
-	StoreAllRecordsToStorage bool
-	InputTimeOut             time.Duration
-	MaximumQueueMessagesSize int32
-	MaximumMessagesInQueue   uint16
-}
-
-var DefaultQueueOptions = QueueOptions{
-	MinimunWorkersCount:      4,
-	MaximumWorkersCount:      32,
-	StorageOptions:           nil,
-	MaximumMessagesPerWorker: 2048,
-	StoreAllRecordsToStorage: false,
-	InputTimeOut:             5 * time.Second,
-	MaximumMessagesInQueue:   2048,
-	MaximumQueueMessagesSize: 16 * 1024 * 1024,
-}
-
-type QueueItem struct {
+//Message is the structure that will be sent to worker for processing
+type Message struct {
 	idx     StorageIdx
 	ID      StorageIdx
 	Buffer  []byte
 	storage storageProcessing
 }
 
+//Queue is a base structure for managing of the messages
 type Queue struct {
 	total        int32
 	name         string
-	options      *QueueOptions
+	options      *Options
 	totalWorkers uint16
-	workers      chan QueueWorker
-	tmpworkers   chan QueueWorker
+	workers      chan Worker
+	tmpworkers   chan Worker
 	log          Logging
 	newMessage   chan struct{}
 	stopEvent    chan struct{}
 	stopedHandle chan struct{}
 	storage      *fileStorage
 	memory       *queueMemory
-	masterWorker QueueWorker
+	masterWorker Worker
 	inProcess    *inProcessingPerWorker
 }
 
@@ -59,7 +38,8 @@ type newMessageNotificator interface {
 	newMessageNotification()
 }
 
-func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Options *QueueOptions) (*Queue, error) {
+//CreateQueue is function than creates and inits internal states  :
+func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *Options) (*Queue, error) {
 	if Reader == nil {
 		Reader = &nullReader{}
 	}
@@ -74,7 +54,7 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Opti
 
 	tmp := &Queue{
 		total:        0,
-		workers:      make(chan QueueWorker, Options.MaximumWorkersCount),
+		workers:      make(chan Worker, Options.MaximumWorkersCount),
 		stopedHandle: make(chan struct{}),
 		newMessage:   make(chan struct{}, 1),
 		log:          Log,
@@ -95,7 +75,7 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Opti
 		fs, Log, Options.InputTimeOut, tmp)
 
 	if Reader.NeedTimeoutProcessing() {
-		tmp.tmpworkers = make(chan QueueWorker, Options.MaximumWorkersCount)
+		tmp.tmpworkers = make(chan Worker, Options.MaximumWorkersCount)
 	}
 	for i := uint16(0); i < Options.MinimunWorkersCount; i++ {
 		newReader := Reader.CreateClone()
@@ -123,10 +103,10 @@ func (q *Queue) newMessageNotification() {
 	}
 }
 
-func (q *Queue) getOneItemFromStorage() (*QueueItem, error) {
+func (q *Queue) getOneItemFromStorage() (*Message, error) {
 	MemData, err := q.memory.Get()
 	if err == nil {
-		fw := &QueueItem{
+		fw := &Message{
 			idx:     MemData.idx,
 			ID:      MemData.idx,
 			Buffer:  MemData.buf,
@@ -137,15 +117,23 @@ func (q *Queue) getOneItemFromStorage() (*QueueItem, error) {
 	return q.storage.Get()
 }
 
+// Process must be called from the worker of the message. In depends
+// of the `isOk` parameter either messages are deleting from the queue
+// or are marking as faulty and again processing after some timeout
 func (q *Queue) Process(worker WorkerID, isOk bool) {
 	q.log.Trace("[Q:%s] Receiver answer from worker (%d) [%v]", q.name, worker, isOk)
 	q.inProcess.processList(worker, isOk)
 }
 
+//Count returns the count of the messages in the queue
 func (q *Queue) Count() uint64 {
 	return q.storage.Count() + q.memory.Count()
 }
 
+// Insert appends the message into the queue. In depends of the timeout's option either is trying
+// to write message to the disk or is trying to process this message in the memory and writing to the
+// disk only if timeout is expired shortly. Returns false if aren't processing / writing of the message
+// in the during of the timeout or has some problems with  writing to disk
 func (q *Queue) Insert(buf []byte) bool {
 	if q.options.InputTimeOut == 0 {
 		return q.insert(buf, nil)
@@ -345,6 +333,8 @@ func (q *Queue) info() {
 	q.storage.info()
 }
 
+// Close stops the handler of the messages, saves the messages located in
+// the memory into the disk, closes all opened files.
 func (q *Queue) Close() {
 	q.log.Info("[Q:%s] is closed...", q.name)
 	q.close()

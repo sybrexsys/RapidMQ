@@ -21,7 +21,7 @@ Base structure in the base is Queue
 Queue is created with that function:
 
 ```
-func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Options *QueueOptions) (*Queue, error)
+func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *Options) (*Queue, error)
 ```
 
 |Parameters         | Type         | Description
@@ -29,8 +29,8 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader QueueWorker, Opti
 |Name 	            |string        | Queue name. Used for logging only
 |StoragePath        |string        | Path to the disk storages' files
 |Log 			    |Logging 	   | Interface is used to logging of the queue's events. If equal to nil, logging is ensent. Description bellow
-|Reader 			|QueueWorker   | Interface is used to processing of the messages. Description bellow 
-|Options 			|*QueueOptions | Options of the queue
+|Reader 			|Worker   | Interface is used to processing of the messages. Description bellow 
+|Options 			|*Options      | Options of the queue
 
 ```
 func (q *Queue) Insert(buf []byte) bool
@@ -52,12 +52,12 @@ func (q *Queue) Close()
 ``` 
 Stops the handler of the messages, saves the messages located in the memory into the disk, closes all opened files.               
 
-***QueueItem***
+***Message***
 
 Description of the structure that will be sent to worker 
 
 ```
-type QueueItem struct {
+type Message struct {
 	ID      StorageIdx
 	Buffer  []byte
 }
@@ -72,34 +72,34 @@ type QueueItem struct {
 
 
 
-***QueueWorker***
+***Worker***
 
 If you are using of your worker, he must support next interface
 ```
-type QueueWorker interface {
-	ProcessMessage(*Queue, *QueueItem, chan QueueWorker)
-	ProcessTimeout(*Queue, chan QueueWorker)
-	CreateClone() QueueWorker
+type Worker interface {
+	ProcessMessage(*Queue, *Message, chan Worker)
+	ProcessTimeout(*Queue, chan Worker)
+	CreateClone() Worker
 	GetID() WorkerID
 	NeedTimeoutProcessing() bool
 }
 ```
 
 ```
-ProcessMessage(*Queue, *QueueItem, chan QueueWorker)
+ProcessMessage(*Queue, *Message, chan Worker)
 ``` 
-Processes message that is stored in `*QueueItem`.
-After it the worker must call function `(*Queue).Process` with his unique identifier and with result of the processing, also must be pushed himself into chanal `QueueWorker`
+Processes message that is stored in `*Message`.
+After it the worker must call function `(*Queue).Process` with his unique identifier and with result of the processing, also must be pushed himself into chanal `Worker`
 
 ```
-ProcessTimeout(*Queue, chan QueueWorker)
+ProcessTimeout(*Queue, chan Worker)
 ```
-Processes message that is stored in `*QueueItem`.
-After it the worker must call function `(*Queue).Process` with his unique identifier and with result of the processing, also must send himself into chanal `QueueWorker`
+Processing of the event when available messages is absent   
+After it the worker must call function `(*Queue).Process` with his unique identifier and with result of the processing, also must send himself into chanal `Worker`
 
 
 ```
-CreateClone() QueueWorker
+CreateClone() Worker
 ```
 Main worker (that was sent as parameter when created queue) must have possibility to make clone of himself. This clone must perform same processing as his parent. The identifier of the clone must be unique
 
