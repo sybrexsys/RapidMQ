@@ -1,5 +1,6 @@
 package queue
 
+// Logging is the interface that must support logging system for work with queue
 type Logging interface {
 	Trace(msg string, a ...interface{})
 	Info(msg string, a ...interface{})

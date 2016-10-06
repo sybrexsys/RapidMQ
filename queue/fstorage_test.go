@@ -205,7 +205,7 @@ func TestWorkWithReleaseRecord(t *testing.T) {
 		t.Fatalf("Invalid value in the storage. Returned: %s  Must return second elementh because first is busy yet", testString)
 	}
 	MySleep(500)
-	z, err = fs.Get()
+	z, _ = fs.Get()
 	zz := string(z.Buffer)
 	if TestStrings[0] != zz {
 		t.Fatalf("Invalid value in the storage : %s.  Must return first element because timeout expired ", zz)

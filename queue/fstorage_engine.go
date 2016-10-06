@@ -17,7 +17,7 @@ import (
 
 var startTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// InvalidIdx id Invalid index description
+// InvalidIdx is Invalid index description
 const InvalidIdx StorageIdx = 0xFFFFFFFFFFFFFFFF
 
 var magicNumberDataPrefix = uint32(0x67452301)
@@ -28,6 +28,7 @@ type fileAccess struct {
 	Handle *os.File
 }
 
+//StorageIdx is unique identifier of the message in the memory or on the disk
 type StorageIdx uint64
 
 const (
@@ -41,7 +42,6 @@ const (
 	putRecordAsInProcess
 	putRecordAsProcessedWithError
 )
-
 
 type storagePutter interface {
 	put(buffer []byte, option int) (StorageIdx, error)
@@ -106,7 +106,7 @@ type fileStorage struct {
 	options                   *StorageOptions           // storage options
 	readMutex                 sync.RWMutex              // mutex for work with file handles for output from the sorage
 	readFiles                 map[StorageIdx]fileAccess // map for store read handles of the storage
-	writeFiles                *filequeue                // list of the opened handles for writting
+	writeFiles                *filequeue                // list of the opened handles for writing
 	idxFile                   *os.File
 	mmapinfo                  mmap.MMap
 	mmapsize                  int64

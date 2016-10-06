@@ -11,7 +11,6 @@ import (
 	"time"
 )
 
-
 const (
 	logComMessage = iota
 	logComClose
@@ -26,10 +25,10 @@ const (
 
 type logMessage struct {
 	command int
-	id      int
 	message string
 }
 
+//Logger is structure for internal use
 type Logger struct {
 	chanal      chan logMessage
 	isOuted     chan struct{}
@@ -68,20 +67,20 @@ func (logger *Logger) startRotation() {
 		if !ok || data.command == logComClose {
 			break
 		}
-		logger.saveMessage(data.message, data.id)
+		logger.saveMessage(data.message)
 	}
 	logger.isOuted <- struct{}{}
 }
 
 func (logger *Logger) saveHeader() {
-	writeStrToFile(logger.file, 0, "")
-	writeStrToFile(logger.file, 10, "----- Started -----")
-	writeStrToFile(logger.file, 100, fmt.Sprintf("NumCPU:[%d] OS:[%s] Arch:[%s]", runtime.NumCPU(), runtime.GOOS, runtime.GOARCH))
-	writeStrToFile(logger.file, 1000, "")
-	writeStrToFile(logger.file, 10000, "-------------------")
+	writeStrToFile(logger.file, "")
+	writeStrToFile(logger.file, "----- Started -----")
+	writeStrToFile(logger.file, fmt.Sprintf("NumCPU:[%d] OS:[%s] Arch:[%s]", runtime.NumCPU(), runtime.GOOS, runtime.GOARCH))
+	writeStrToFile(logger.file, "")
+	writeStrToFile(logger.file, "-------------------")
 }
 
-func writeStrToFile(file *os.File, id int, message string) error {
+func writeStrToFile(file *os.File, message string) error {
 	str := time.Now().Format("2006-01-02 15:04:05.000") + message + "\n"
 	buffer := []byte(str)
 	if _, err := file.Write(buffer); err != nil {
@@ -90,7 +89,7 @@ func writeStrToFile(file *os.File, id int, message string) error {
 	return nil
 }
 
-func (logger *Logger) saveMessage(msg string, id int) error {
+func (logger *Logger) saveMessage(msg string) error {
 	pos, err := logger.file.Seek(0, 2)
 	if err != nil {
 		return err
@@ -110,13 +109,14 @@ func (logger *Logger) saveMessage(msg string, id int) error {
 		logger.saveHeader()
 	}
 
-	if err = writeStrToFile(logger.file, id, msg); err != nil {
+	if err = writeStrToFile(logger.file, msg); err != nil {
 		atomic.StoreInt32(&logger.canwrite, 0)
 		return err
 	}
 	return nil
 }
 
+//CreateLog is created new logging system
 func CreateLog(fileName string, maxFileSize int64, level byte) (logger *Logger, err error) {
 	logger = new(Logger)
 	logger.fileName = fileName
@@ -148,42 +148,30 @@ func (logger *Logger) infoout(infotype, id int, msg string, a ...interface{}) {
 	logger.chanal <- logMessage{
 		command: logComMessage,
 		message: m,
-		id:      id,
 	}
 }
 
+// Trace outputs the message into log with Trace level
 func (logger *Logger) Trace(msg string, a ...interface{}) {
 	logger.infoout(logInfoTypeTrace, 0, msg, a...)
 }
 
+// Warning outputs the message into log with Warning level
 func (logger *Logger) Warning(msg string, a ...interface{}) {
 	logger.infoout(logInfoTypeWarning, 0, msg, a...)
 }
 
+// Error outputs the message into log with Warning level
 func (logger *Logger) Error(msg string, a ...interface{}) {
 	logger.infoout(logInfoTypeError, 0, msg, a...)
 }
 
+// Info outputs the message into log with Warning level
 func (logger *Logger) Info(msg string, a ...interface{}) {
 	logger.infoout(logInfoTypeInfo, 0, msg, a...)
 }
 
-func (logger *Logger) TraceID(id int, msg string) {
-	logger.infoout(logInfoTypeTrace, id, msg)
-}
-
-func (logger *Logger) WarningID(id int, msg string) {
-	logger.infoout(logInfoTypeWarning, id, msg)
-}
-
-func (logger *Logger) ErrorID(id int, msg string) {
-	logger.infoout(logInfoTypeError, id, msg)
-}
-
-func (logger *Logger) InfoID(id int, msg string) {
-	logger.infoout(logInfoTypeInfo, id, msg)
-}
-
+// Close closes all opened handles and stop logging
 func (logger *Logger) Close() {
 
 	logger.chanal <- logMessage{
@@ -193,26 +181,4 @@ func (logger *Logger) Close() {
 	<-logger.isOuted
 	logger.file.Close()
 
-}
-
-type StdLog int
-
-func (logger StdLog) Trace(msg string, a ...interface{}) {
-	m := addPrefix(logInfoTypeTrace, msg, a...)
-	log.Println(m)
-}
-
-func (logger StdLog) Warning(msg string, a ...interface{}) {
-	m := addPrefix(logInfoTypeWarning, msg, a...)
-	log.Println(m)
-}
-
-func (logger StdLog) Error(msg string, a ...interface{}) {
-	m := addPrefix(logInfoTypeError, msg, a...)
-	log.Println(m)
-}
-
-func (logger StdLog) Info(msg string, a ...interface{}) {
-	m := addPrefix(logInfoTypeInfo, msg, a...)
-	log.Println(m)
 }

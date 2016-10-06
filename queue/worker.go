@@ -2,7 +2,7 @@ package queue
 
 import "sync/atomic"
 
-//WorkerID is an identifier of the workerS
+//WorkerID is an identifier of the worker
 type WorkerID uint64
 
 //Worker is interface that allow to structure to processing outgoing message

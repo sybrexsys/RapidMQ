@@ -102,7 +102,6 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, worker Worker, withLoging
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
-	totsize := uint64(0)
 	tot := uint64(0)
 	var m sync.Mutex
 	var wg sync.WaitGroup
@@ -113,7 +112,6 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, worker Worker, withLoging
 			for j := int64(0); j < kk; j++ {
 				tmp := make([]byte, rand.Intn(0x3fff))
 				m.Lock()
-				totsize += uint64(len(tmp))
 				wrk := tot
 				tot++
 				m.Unlock()
