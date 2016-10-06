@@ -1,6 +1,6 @@
 RapidMQ
 =======
-RapidMQ is a pure, extremely productive, lightweight and relaible library for managing of the local messages queue in the [Go programming language](http:golang.org).       
+RapidMQ is a pure, extremely productive, lightweight and reliable library for managing of the local messages queue in the [Go programming language](http:golang.org).       
 
 Installation
 -----------
