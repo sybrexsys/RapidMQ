@@ -1,3 +1,6 @@
+[![Go Report Card](https://goreportcard.com/badge/github.com/sybrexsys/RapidMQ)](https://goreportcard.com/report/github.com/sybrexsys/RapidMQ)
+
+
 RapidMQ
 =======
 RapidMQ is a pure, extremely productive, lightweight and reliable library for managing of the local messages queue in the [Go programming language](http:golang.org).       
