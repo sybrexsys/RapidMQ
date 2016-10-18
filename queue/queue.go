@@ -245,7 +245,9 @@ func (q *Queue) loop() {
 	var to <-chan time.Time
 	MaxWorkers := q.options.MaximumWorkersCount
 	AvailableWorker := q.workers
-	Timer := time.NewTimer(time.Millisecond * 5000)
+	Timer := time.NewTimer(time.Millisecond * 10000)
+	AC := 0
+	MC := 1
 gofor:
 	for {
 		select {
@@ -253,7 +255,7 @@ gofor:
 			break gofor
 		case <-q.newMessage:
 			if AvailableWorker == nil {
-				q.log.Trace("[Q:%s]New message was received or timeout expired. Start reading messages", q.name)
+				//		q.log.Trace("[Q:%s]New message was received or timeout expired. Start reading messages", q.name)
 				AvailableWorker = q.workers
 			}
 			if len(q.workers) == 0 && q.totalWorkers < MaxWorkers {
@@ -278,13 +280,14 @@ gofor:
 				}
 				q.log.Trace("[Q:%s:%d] Loaded from %s and sent to worker (%d)", q.name, item.ID, item.storage.description(), worker.GetID())
 				go worker.ProcessMessage(q, item, q.workers)
+				MC = 1
 				continue
 			}
 			q.inProcess.decrementList(worker.GetID())
 			AvailableWorker = nil
 			q.workers <- worker
 			myerr, ok := err.(*queueError)
-			timer := time.Millisecond * 5000
+			timer := time.Millisecond * 10000
 			if ok {
 				switch myerr.ErrorType {
 				case errorInDelay:
@@ -293,7 +296,7 @@ gofor:
 					}
 					q.log.Trace("[Q:%s] Next messages will available in %s", q.name, myerr.NextAvailable.String())
 				case errorNoMore:
-					q.log.Trace("[Q:%s] No mo available messages", q.name)
+					//	q.log.Trace("[Q:%s] No mo available messages", q.name)
 				}
 			} else {
 				q.log.Trace("[Q:%s] Received answer from storage %s", q.name, err.Error())
@@ -313,7 +316,16 @@ gofor:
 		case <-to:
 			if AvailableWorker == nil {
 				AvailableWorker = q.workers
-				q.log.Trace("[Q:%s] Timeout detected", q.name)
+				AC++
+				if AC >= MC {
+					q.log.Trace("[Q:%s] Idle ", q.name)
+					if MC == 1 {
+						MC += 2
+					} else {
+						MC += 3
+					}
+					AC = 0
+				}
 			}
 		}
 	}
