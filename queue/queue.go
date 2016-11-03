@@ -30,7 +30,7 @@ type Queue struct {
 	stopedHandle chan struct{}
 	storage      *fileStorage
 	memory       *queueMemory
-	masterWorker Worker
+	factory      WorkerFactory
 	inProcess    *inProcessingPerWorker
 }
 
@@ -39,9 +39,9 @@ type newMessageNotificator interface {
 }
 
 //CreateQueue is function than creates and inits internal states  :
-func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *Options) (*Queue, error) {
-	if Reader == nil {
-		Reader = &nullReader{}
+func CreateQueue(Name, StoragePath string, Log Logging, Factory WorkerFactory, Options *Options) (*Queue, error) {
+	if Factory == nil {
+		Factory = &nullWorkerFactory{}
 	}
 	if Options == nil {
 		Options = &DefaultQueueOptions
@@ -59,7 +59,7 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *
 		newMessage:   make(chan struct{}, 1),
 		log:          Log,
 		options:      Options,
-		masterWorker: Reader,
+		factory:      Factory,
 		name:         Name,
 		stopEvent:    make(chan struct{}),
 	}
@@ -74,11 +74,11 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *
 	tmp.memory = createMemoryQueue(Name, Options.MaximumMessagesInQueue, Options.MaximumQueueMessagesSize,
 		fs, Log, Options.InputTimeOut, tmp)
 
-	if Reader.NeedTimeoutProcessing() {
+	if Factory.NeedTimeoutProcessing() {
 		tmp.tmpworkers = make(chan Worker, Options.MaximumWorkersCount)
 	}
 	for i := uint16(0); i < Options.MinimunWorkersCount; i++ {
-		newReader := Reader.CreateClone()
+		newReader := Factory.CreateWorker()
 		tmp.workers <- newReader
 		tmp.log.Trace("[Q:%s] New reader (%d) was created.", tmp.name, newReader.GetID())
 	}
@@ -259,7 +259,7 @@ gofor:
 				AvailableWorker = q.workers
 			}
 			if len(q.workers) == 0 && q.totalWorkers < MaxWorkers {
-				tmp := q.masterWorker.CreateClone()
+				tmp := q.factory.CreateWorker()
 				q.workers <- tmp
 				q.totalWorkers++
 				q.log.Trace("[Q:%s] New reader (%d) was created  Current count is %d ", q.name, tmp.GetID(), q.totalWorkers)

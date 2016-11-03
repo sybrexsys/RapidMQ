@@ -27,7 +27,7 @@ Base structure in the base is Queue
 Queue is created with that function:
 
 ```
-func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *Options) (*Queue, error)
+func CreateQueue(Name, StoragePath string, Log Logging, Factory WorkerFactory, Options *Options) (*Queue, error)
 ```
 
 |Parameters         | Type         | Description
@@ -35,7 +35,7 @@ func CreateQueue(Name, StoragePath string, Log Logging, Reader Worker, Options *
 |Name 	            |string        | Queue name. Used for logging only
 |StoragePath        |string        | Path to the disk storages' files
 |Log 			    |Logging 	   | Interface is used to logging of the queue's events. If equal to nil, logging is ensent. Description bellow
-|Reader 			|Worker   | Interface is used to processing of the messages. Description bellow 
+|Factory 			|WorkerFactory | Interface for abstract factory of the workers. Description bellow 
 |Options 			|*Options      | Options of the queue
 
 ```
@@ -77,6 +77,27 @@ type Message struct {
 
 
 
+***WorkerFactory***
+
+Worker factory is a structure that create workers for processing messages
+Your factory must support next interface: 
+```
+type WorkerFactory interface {
+	CreateWorker() Worker
+	NeedTimeoutProcessing() bool
+}
+```
+
+```
+CreateWorker() Worker
+```
+Creates new worker for this factory with unique ID
+
+NeedTimeoutProcessing() bool
+```
+Returns true if possible used some messages in one action (for example, collect large SQL script from lot of the small messages)  
+
+
 
 ***Worker***
 
@@ -85,9 +106,7 @@ If you are using of your worker, he must support next interface
 type Worker interface {
 	ProcessMessage(*Queue, *Message, chan Worker)
 	ProcessTimeout(*Queue, chan Worker)
-	CreateClone() Worker
 	GetID() WorkerID
-	NeedTimeoutProcessing() bool
 }
 ```
 
@@ -103,24 +122,12 @@ ProcessTimeout(*Queue, chan Worker)
 Processing of the event when available messages is absent   
 After it the worker must call function `(*Queue).Process` with his unique identifier and with result of the processing, also must send himself into chanal `Worker`
 
-
-```
-CreateClone() Worker
-```
-Main worker (that was sent as parameter when created queue) must have possibility to make clone of himself. This clone must perform same processing as his parent. The identifier of the clone must be unique
-
-
 ```
 GetID() WorkerID
 ```
 Returns unique identifier of the worker
 
 ```
-NeedTimeoutProcessing() bool
-```
-Returns true if possible used some messages in one action (for example, collect large SQL script from lot of the small messages)  
-
-
 
 ***Logging***
 

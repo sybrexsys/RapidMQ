@@ -16,7 +16,7 @@ const (
 	testStateErrorsBeforeOk
 )
 
-type nullReaderTestUnit struct {
+type nullWorkerTestUnit struct {
 	id               WorkerID
 	cnt              int
 	delay            time.Duration
@@ -25,8 +25,17 @@ type nullReaderTestUnit struct {
 	isTimeOut        bool
 }
 
-func (n *nullReaderTestUnit) CreateClone() Worker {
-	return &nullReaderTestUnit{
+type nullWorkerTestUnitFactory struct {
+	id               WorkerID
+	cnt              int
+	delay            time.Duration
+	state            int
+	changeStateCount int
+	isTimeOut        bool
+}
+
+func (n *nullWorkerTestUnitFactory) CreateWorker() Worker {
+	return &nullWorkerTestUnit{
 		id:               WorkerID(atomic.AddUint64((*uint64)(&n.id), 1) - 1),
 		changeStateCount: n.changeStateCount,
 		delay:            n.delay,
@@ -35,7 +44,11 @@ func (n *nullReaderTestUnit) CreateClone() Worker {
 	}
 }
 
-func (n *nullReaderTestUnit) isOk() bool {
+func (n *nullWorkerTestUnitFactory) NeedTimeoutProcessing() bool {
+	return n.isTimeOut
+}
+
+func (n *nullWorkerTestUnit) isOk() bool {
 	switch n.state {
 	case testStateOk:
 		return true
@@ -58,7 +71,7 @@ func (n *nullReaderTestUnit) isOk() bool {
 	return true
 }
 
-func (n *nullReaderTestUnit) ProcessMessage(q *Queue, msg *Message, Next chan Worker) {
+func (n *nullWorkerTestUnit) ProcessMessage(q *Queue, msg *Message, Next chan Worker) {
 	time.Sleep(n.delay)
 	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 	if !n.isTimeOut {
@@ -68,22 +81,18 @@ func (n *nullReaderTestUnit) ProcessMessage(q *Queue, msg *Message, Next chan Wo
 	q.log.Trace("[Q:%s] Worker (%d) ready for work", q.name, ID)
 }
 
-func (n *nullReaderTestUnit) ProcessTimeout(q *Queue, Next chan Worker) {
+func (n *nullWorkerTestUnit) ProcessTimeout(q *Queue, Next chan Worker) {
 	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 	q.Process(ID, n.isOk())
 	Next <- n
 	q.log.Trace("[Q:%s] Worker (%d) ready for work", q.name, ID)
 }
 
-func (n *nullReaderTestUnit) GetID() WorkerID {
+func (n *nullWorkerTestUnit) GetID() WorkerID {
 	return WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 }
 
-func (n *nullReaderTestUnit) NeedTimeoutProcessing() bool {
-	return n.isTimeOut
-}
-
-func WorkOptions(t *testing.T, kk int64, opt *Options, worker Worker, withLoging bool) bool {
+func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, withLoging bool) bool {
 	var (
 		log *logging.Logger
 		err error
@@ -98,7 +107,7 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, worker Worker, withLoging
 		}
 	}
 
-	q, err := CreateQueue("Test", TestFolder, log, worker, opt)
+	q, err := CreateQueue("Test", TestFolder, log, factory, opt)
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
@@ -151,7 +160,7 @@ loop:
 
 type testOptions struct {
 	kk      int64
-	worker  Worker
+	factory WorkerFactory
 	options Options
 	logging bool
 }
@@ -164,7 +173,7 @@ func TestQueue(t *testing.T) {
 		{ // Timeout On
 			kk:      20,
 			options: DefaultQueueOptions,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut: false,
 				state:     testStateOk,
 			},
@@ -173,7 +182,7 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      20,
 			options: DefaultQueueOptions,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut:        false,
 				state:            testStateOkBeforeError,
 				changeStateCount: 20,
@@ -184,7 +193,7 @@ func TestQueue(t *testing.T) {
 		{ // Timeout Off
 			kk:      20,
 			options: DefaultQueueOptionsWithOutTimeout,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut: false,
 				state:     testStateOk,
 			},
@@ -193,7 +202,7 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      20,
 			options: DefaultQueueOptionsWithOutTimeout,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut:        false,
 				state:            testStateOkBeforeError,
 				changeStateCount: 20,
@@ -204,7 +213,7 @@ func TestQueue(t *testing.T) {
 		{ // Timeout On
 			kk:      20,
 			options: DefaultQueueOptions,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut: true,
 				state:     testStateOk,
 			},
@@ -213,7 +222,7 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      20,
 			options: DefaultQueueOptions,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut:        true,
 				state:            testStateOkBeforeError,
 				changeStateCount: 20,
@@ -223,7 +232,7 @@ func TestQueue(t *testing.T) {
 		{ // Timeout Off
 			kk:      20,
 			options: DefaultQueueOptionsWithOutTimeout,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut: true,
 				state:     testStateOk,
 			},
@@ -232,7 +241,7 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      20,
 			options: DefaultQueueOptionsWithOutTimeout,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut:        true,
 				state:            testStateOkBeforeError,
 				changeStateCount: 20,
@@ -243,7 +252,7 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      100,
 			options: DefaultQueueOptions,
-			worker: &nullReaderTestUnit{
+			factory: &nullWorkerTestUnitFactory{
 				isTimeOut:        true,
 				state:            testStateOkBeforeError,
 				changeStateCount: 20,
@@ -254,13 +263,13 @@ func TestQueue(t *testing.T) {
 		{ //
 			kk:      100,
 			options: DefaultQueueOptionsWithOutTimeout,
-			worker:  &nullReader{},
+			factory: &nullWorkerFactory{},
 			logging: true,
 		},
 	}
 
 	for _, k := range tests {
-		if !WorkOptions(t, k.kk, &k.options, k.worker, k.logging) {
+		if !WorkOptions(t, k.kk, &k.options, k.factory, k.logging) {
 			break
 		}
 
