@@ -128,7 +128,6 @@ GetID() WorkerID
 ```
 Returns unique identifier of the worker
 
-```
 
 ***Logging***
 
