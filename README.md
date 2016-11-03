@@ -93,6 +93,7 @@ CreateWorker() Worker
 ```
 Creates new worker for this factory with unique ID
 
+```
 NeedTimeoutProcessing() bool
 ```
 Returns true if possible used some messages in one action (for example, collect large SQL script from lot of the small messages)  
