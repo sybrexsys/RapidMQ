@@ -18,7 +18,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
-	"unsafe" 
+	"unsafe"
 )
 
 const (
@@ -31,12 +31,12 @@ const (
 	// COPY maps the memory as copy-on-write. Writes to the MMap object will affect
 	// memory, but the underlying file will remain unchanged.
 	COPY
-	// If EXEC is set, the mapped memory is marked as executable.
+	// EXEC if is set, the mapped memory is marked as executable.
 	EXEC
 )
 
 const (
-	// If the ANON flag is set, the mapped memory will not be backed by a file.
+	// ANON If the flag is set, the mapped memory will not be backed by a file.
 	ANON = 1 << iota
 )
 
