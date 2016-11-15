@@ -78,7 +78,7 @@ func TestFillIncrementIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
-	stat, err := os.Stat(TestFolder + "index.dat")
+	stat, _ := os.Stat(TestFolder + "index.dat")
 	reccount := int64(0x8000)
 	if stat.Size() != reccount {
 		t.Fatalf("Invalid size of the index file")
@@ -115,8 +115,7 @@ func TestFillingData(t *testing.T) {
 	for i := 0; i < 500; i++ {
 		fs.Put([]byte("Test of the work with all structures"))
 	}
-	i := 0
-	for i = 0; i < 500; i++ {
+	for i := 0; i < 500; i++ {
 		z, err = fs.Get()
 		if err != nil {
 			t.Fatalf("Error reading from storage: %s", err)
@@ -158,7 +157,7 @@ func TestFillingData(t *testing.T) {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
 	odd = 0
-	for z, _ := fs.Get(); err == nil; z, err = fs.Get() {
+	for z, err = fs.Get(); err == nil; z, err = fs.Get() {
 		if TestStrings[odd] != string(z.Buffer) {
 			t.Fatalf("Invalid value of the storage\n")
 		}
@@ -197,9 +196,9 @@ func TestWorkWithReleaseRecord(t *testing.T) {
 	for _, k := range TestStrings {
 		fs.Put([]byte(k))
 	}
-	z, err = fs.Get()
+	z, _ = fs.Get()
 	fs.UnlockRecord(z.idx)
-	z, err = fs.Get()
+	z, _ = fs.Get()
 	testString := string(z.Buffer)
 	if TestStrings[1] != testString {
 		t.Fatalf("Invalid value in the storage. Returned: %s  Must return second elementh because first is busy yet", testString)
@@ -238,6 +237,7 @@ func TestWorkStorageSize(t *testing.T) {
 
 func TestFillDeleteUnusedDataFiles(t *testing.T) {
 	var buffer [2000]byte
+	var z *Message
 	clearTestFolder()
 	zzz := 99
 	options := DefaultStorageOptions
@@ -251,13 +251,13 @@ func TestFillDeleteUnusedDataFiles(t *testing.T) {
 		fs.Put(buffer[:])
 	}
 	for i := 0; i < zzz-2; i++ {
-		z, err := fs.Get()
+		z, err = fs.Get()
 		if err != nil {
 			t.Fatalf("Error reading from storage: %s", err)
 		}
 		fs.FreeRecord(z.idx)
 	}
-	z, err := fs.Get()
+	z, err = fs.Get()
 	if err != nil {
 		t.Fatalf("Error reading from storage: %s", err)
 	}
@@ -287,7 +287,7 @@ func TestErrors(t *testing.T) {
 		}
 		fs.Put([]byte(k))
 	}
-	z, err = fs.Get()
+	z, _ = fs.Get()
 	fs.UnlockRecord(z.idx)
 	z, err = fs.Get()
 	if err != nil {

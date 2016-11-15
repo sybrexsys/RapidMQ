@@ -21,7 +21,6 @@ type filequeue struct {
 	sync.RWMutex
 	memMutex sync.Mutex
 	storage  *fileStorage
-	total    int
 	state    map[StorageIdx]int
 	toOut    chan *fileWrite
 }

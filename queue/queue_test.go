@@ -135,19 +135,15 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, wi
 	wg.Wait()
 	picker := time.NewTicker(10 * time.Millisecond)
 	d := 0
-loop:
-	for {
-		select {
-		case <-picker.C:
-			d++
-			if d == 500 {
-				t.Errorf("Not finished in %s...\n", time.Since(start))
-				isOk = false
-				break loop
-			}
-			if q.Count() == 0 {
-				break loop
-			}
+	for range picker.C {
+		d++
+		if d == 500 {
+			t.Errorf("Not finished in %s...\n", time.Since(start))
+			isOk = false
+			break
+		}
+		if q.Count() == 0 {
+			break
 		}
 
 	}

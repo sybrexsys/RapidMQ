@@ -31,17 +31,8 @@ type StorageOptions struct {
 
 //Options holds the optional parameters for the managing of the messages.
 type Options struct {
-	// Minimum count of the workers per queue
-	MinimunWorkersCount uint16
-
-	// Minimum count of the workers per queue
-	MaximumWorkersCount uint16
-
 	// Options for file storage connected to this queue
 	StorageOptions *StorageOptions
-
-	// Maximum count of the messages that thw worker can crocess per one time
-	MaximumMessagesPerWorker uint16
 
 	// In the during of timeout, message must be processed or saved to disk
 	InputTimeOut time.Duration
@@ -51,6 +42,15 @@ type Options struct {
 
 	// Maximum count of the messages what can be processed without storing to disk
 	MaximumMessagesInQueue uint16
+
+	// Minimum count of the workers per queue
+	MinimunWorkersCount uint16
+
+	// Minimum count of the workers per queue
+	MaximumWorkersCount uint16
+
+	// Maximum count of the messages that thw worker can crocess per one time
+	MaximumMessagesPerWorker uint16
 }
 
 // DefaultStorageOptions is default options for filestorage

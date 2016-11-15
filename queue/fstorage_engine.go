@@ -63,21 +63,21 @@ type availableRecordInfo struct {
 
 type indexFileHeader struct {
 	MagicNumber     uint64
-	IndexRecordSize int32
-	MinIndex        StorageIdx
 	TotalRecord     uint64
 	TotalFree       uint64
+	MinIndex        StorageIdx
 	CRC             int32
+	IndexRecordSize int32
 }
 
 type indexRecord struct {
 	ID         StorageIdx
-	State      int32
 	FileIndex  StorageIdx
+	LastAction time.Duration
+	State      int32
 	FileOffset uint32
 	Length     int32
 	TryCount   int32
-	LastAction time.Duration
 }
 
 var (
@@ -128,6 +128,10 @@ func (fs *fileStorage) newID() (StorageIdx, error) {
 		if !fs.checkFreeIndexRecords(true) {
 			fs.mmapinfo.Unmap()
 			indexFileSize, err := fs.calculateNextSize(fs.mmapsize + 1)
+			if err != nil {
+				fs.idxFile.Close()
+				return InvalidIdx, err
+			}
 			fs.idxFile.Seek(indexFileSize-1, 0)
 			fs.idxFile.Write(dot[0:1])
 			fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
@@ -163,7 +167,7 @@ func (fs *fileStorage) RecordsSize() uint64 {
 func (fs *fileStorage) Count() uint64 {
 	fs.idxMutex.Lock()
 	defer fs.idxMutex.Unlock()
-	return uint64(fs.TotalRecord) - fs.TotalFree
+	return fs.TotalRecord - fs.TotalFree
 }
 
 // description is used in logging system for detect source of the processing message
@@ -375,12 +379,12 @@ func (fs *fileStorage) FreeRecord(Idx StorageIdx) error {
 
 // setMMapInfo sets index slice ond header of the index file to memopry mapped file
 func (fs *fileStorage) setMMapInfo() {
-	fs.indexFileHeader = (*indexFileHeader)(unsafe.Pointer(&fs.mmapinfo[0]))
-	head := (*reflect.SliceHeader)(unsafe.Pointer(&fs.idx))
-	sof := unsafe.Sizeof(*fs.indexFileHeader)
-	head.Data = uintptr(unsafe.Pointer(&fs.mmapinfo[sof]))
+	fs.indexFileHeader = (*indexFileHeader)(unsafe.Pointer(&fs.mmapinfo[0])) //#nosec
+	head := (*reflect.SliceHeader)(unsafe.Pointer(&fs.idx))                  //#nosec
+	sof := unsafe.Sizeof(*fs.indexFileHeader)                                //#nosec
+	head.Data = uintptr(unsafe.Pointer(&fs.mmapinfo[sof]))                   //#nosec
 	var ir indexRecord
-	head.Len = int((uintptr(fs.mmapsize) - sof) / unsafe.Sizeof(ir))
+	head.Len = int((uintptr(fs.mmapsize) - sof) / unsafe.Sizeof(ir)) //#nosec
 	head.Cap = head.Len
 }
 
@@ -416,10 +420,16 @@ func (fs *fileStorage) prepareIndexFile() error {
 	isNewFile := (indexFileSize == 0)
 	if isNewFile {
 		indexFileSize, err = fs.calculateNextSize(0)
+		if err != nil {
+			return err
+		}
 		fs.idxFile.Seek(indexFileSize-1, 0)
 		fs.idxFile.Write(dot[0:1])
 	} else {
 		indexFileSize, err = fs.calculateNextSize(indexFileSize)
+		if err != nil {
+			return err
+		}
 	}
 	fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
 	if err != nil {
@@ -432,7 +442,7 @@ func (fs *fileStorage) prepareIndexFile() error {
 		var r indexRecord
 		fs.MagicNumber = magicNumberValue
 		fs.CRC = 0
-		fs.IndexRecordSize = int32(unsafe.Sizeof(r))
+		fs.IndexRecordSize = int32(unsafe.Sizeof(r)) //#nosec
 		fs.MinIndex = 0
 		fs.TotalRecord = 0
 		fs.TotalFree = 0
@@ -672,7 +682,7 @@ func createStorage(StorageName, StorageLocation string, Log Logging, Options *St
 }
 
 // close closes all interhal opened handles
-func (fs *fileStorage) close() error {
+func (fs *fileStorage) close() {
 	if fs.mmapinfo != nil {
 		fs.mmapinfo.Unmap()
 		fs.idxFile.Close()
@@ -688,17 +698,16 @@ func (fs *fileStorage) close() error {
 	fs.readFiles = nil
 	fs.readMutex.Unlock()
 	fs.writeFiles.free()
-	return nil
 }
 
 // Close closes file storage
-func (fs *fileStorage) Close() error {
+func (fs *fileStorage) Close() {
 	fs.log.Info("[QFS:%s] is closed... Record count is %d", fs.name, fs.TotalRecord-fs.TotalFree)
 	fs.checkFreeIndexRecords(false)
 	fs.close()
 	fs.checkUnusedFiles()
 	fs.log.Info("[QFS:%s] was closed successful...", fs.name)
-	return nil
+	return
 }
 
 func (fs *fileStorage) info() {

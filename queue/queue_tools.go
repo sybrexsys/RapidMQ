@@ -3,6 +3,7 @@ package queue
 import (
 	"encoding/binary"
 	"hash/crc32"
+	"io"
 	"os"
 	"path"
 	"strconv"
@@ -52,7 +53,7 @@ func checkValidFileDataName(name string) int64 {
 }
 
 // saveDataPrefix saves to data file information about data record (prefix and size of the record)
-func saveDataPrefix(fs *os.File, index StorageIdx, size int32) error {
+func saveDataPrefix(fs io.Writer, index StorageIdx, size int32) error {
 	var valAll [16]byte
 	binary.LittleEndian.PutUint32(valAll[:], magicNumberDataPrefix)
 	binary.LittleEndian.PutUint64(valAll[4:], uint64(index))
@@ -62,7 +63,7 @@ func saveDataPrefix(fs *os.File, index StorageIdx, size int32) error {
 }
 
 //saveDataSuffix Saves suffix of the data record
-func saveDataSuffix(fs *os.File, crc uint32) error {
+func saveDataSuffix(fs io.Writer, crc uint32) error {
 	var val [8]byte
 	binary.LittleEndian.PutUint32(val[:], crc)
 	binary.LittleEndian.PutUint32(val[4:], magicNumberDataSuffix)
@@ -71,14 +72,14 @@ func saveDataSuffix(fs *os.File, crc uint32) error {
 }
 
 //saveDataFileHeader saves identity information about data file
-func saveDataFileHeader(fs *os.File) error {
+func saveDataFileHeader(fs io.Writer) error {
 	var val [8]byte
 	binary.LittleEndian.PutUint64(val[:], uint64(magicNumberDataValue))
 	_, err := fs.Write(val[:])
 	return err
 }
 
-func saveDataFileData(File *os.File, Idx StorageIdx, buffer []byte) error {
+func saveDataFileData(File io.Writer, Idx StorageIdx, buffer []byte) error {
 	crc := crc32.ChecksumIEEE(buffer)
 	if err := saveDataPrefix(File, Idx, int32(len(buffer))); err != nil {
 		return err

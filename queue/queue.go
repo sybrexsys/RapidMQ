@@ -18,10 +18,8 @@ type Message struct {
 
 //Queue is a base structure for managing of the messages
 type Queue struct {
-	total        int32
 	name         string
 	options      *Options
-	totalWorkers uint16
 	workers      chan Worker
 	tmpworkers   chan Worker
 	log          Logging
@@ -32,6 +30,8 @@ type Queue struct {
 	memory       *queueMemory
 	factory      WorkerFactory
 	inProcess    *inProcessingPerWorker
+	total        int32
+	totalWorkers uint16
 }
 
 type newMessageNotificator interface {

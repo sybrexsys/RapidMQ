@@ -15,18 +15,18 @@ type queueMemoryItem struct {
 }
 
 type queueMemory struct {
+	maxCnt uint64
+	cnt    uint64
 	sync.Mutex
 	name    string
 	idx     StorageIdx
-	maxSize int32
-	maxCnt  uint64
-	cnt     uint64
-	size    int32
 	list    []*queueMemoryItem
 	putter  storagePutter
 	log     Logging
 	timeout time.Duration
 	notify  newMessageNotificator
+	maxSize int32
+	size    int32
 }
 
 func createMemoryQueue(Name string, MaxCount uint16, MaxSize int32,
@@ -88,7 +88,6 @@ func (mq *queueMemory) processTimeOut(curidx *int) {
 		copy(mq.list[*curidx:mq.cnt], mq.list[*curidx+1:mq.cnt])
 		mq.cnt--
 		*curidx--
-
 	}
 }
 
