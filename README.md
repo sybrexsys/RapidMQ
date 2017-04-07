@@ -108,6 +108,7 @@ type Worker interface {
 	ProcessMessage(*Queue, *Message, chan Worker)
 	ProcessTimeout(*Queue, chan Worker)
 	GetID() WorkerID
+	Close()
 }
 ```
 
@@ -127,6 +128,11 @@ After it the worker must call function `(*Queue).Process` with his unique identi
 GetID() WorkerID
 ```
 Returns unique identifier of the worker
+
+```
+Close() 
+```
+Close is called when queue is finishing work with worker. Here you can close connection to database or etc.
 
 
 ***Logging***
