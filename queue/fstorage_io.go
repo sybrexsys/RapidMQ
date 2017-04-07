@@ -88,7 +88,7 @@ func (fq *filequeue) getHandle(recordSize uint32, idx StorageIdx, timeout time.D
 func (fq *filequeue) putHandle(handle *fileWrite, err error) {
 	fq.memMutex.Lock()
 	defer fq.memMutex.Unlock()
-	fq.storage.log.Error("[FSQ:%s] Received {%d}", fq.storage.name, handle.FileIdx)
+	fq.storage.log.Trace("[FSQ:%s] Received {%d}", fq.storage.name, handle.FileIdx)
 	if err == nil {
 		fq.toOut <- handle
 	}
@@ -106,7 +106,7 @@ func (fq *filequeue) putHandle(handle *fileWrite, err error) {
 func (fq *filequeue) canClear(idx StorageIdx) bool {
 	fq.memMutex.Lock()
 	defer fq.memMutex.Unlock()
-	fq.storage.log.Error("[FSQ:%s] Received reques to delete {%d}", fq.storage.name, idx)
+	fq.storage.log.Trace("[FSQ:%s] Received reques to delete {%d}", fq.storage.name, idx)
 	if _, ok := fq.state[idx]; !ok {
 		fq.storage.log.Error("[FSQ:%s] Not information about this file {%d}", fq.storage.name, idx)
 		return true
@@ -122,4 +122,15 @@ func (fq *filequeue) free() {
 		wrk.Close()
 	}
 	fq.state = nil
+}
+
+func (fq *filequeue) clear(idx StorageIdx) {
+	fq.memMutex.Lock()
+	defer fq.memMutex.Unlock()
+	close(fq.toOut)
+	for handle := range fq.toOut {
+		handle.Close()
+	}
+	fq.state = make(map[StorageIdx]int, 16)
+	fq.toOut = make(chan *fileWrite, cap(fq.toOut))
 }

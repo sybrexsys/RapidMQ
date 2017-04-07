@@ -9,15 +9,20 @@ import (
 	"os"
 )
 
-func (fs *fileStorage) restoreStorageFile(FileIdx StorageIdx) error {
+func (fs *fileStorage) restoreStorageFile(FileIdx StorageIdx) (err error) {
 	var buf [16]byte
 	OneRecordProcessed := false
 	Handle, err := os.Open(fs.folder + dataFileNameByID(FileIdx))
 	if err != nil {
 		return err
 	}
-	defer Handle.Close()
-	io.ReadFull(Handle, buf[:8])
+	defer func() {
+		err = Handle.Close()
+	}()
+	_, err = io.ReadFull(Handle, buf[:8])
+	if err != nil {
+		return err
+	}
 	if binary.LittleEndian.Uint64(buf[:]) != uint64(magicNumberDataValue) {
 		return errors.New("not found magic header")
 	}
@@ -76,7 +81,7 @@ func (fs *fileStorage) restoreStorageFile(FileIdx StorageIdx) error {
 }
 
 // restoreIndexFile tries restore and repair index file of the storage
-func (fs *fileStorage) restoreIndexFile() error {
+func (fs *fileStorage) restoreIndexFile() (err error) {
 	IsOneFileProcessed := false
 	if err := fs.prepareIndexFile(); err != nil {
 		return err
@@ -96,14 +101,20 @@ func (fs *fileStorage) restoreIndexFile() error {
 			if idx == -1 {
 				fn := fs.folder + fname
 				fs.log.Info("Remove unknown file %s", fn)
-				os.Remove(fn)
+				err = os.Remove(fn)
+				if err != nil {
+					return err
+				}
 				continue
 			}
 			err = fs.restoreStorageFile(StorageIdx(idx))
 			if err != nil {
 				fn := fs.folder + fname
 				fs.log.Info("Remove unknown file %s", fn)
-				os.Remove(fn)
+				err = os.Remove(fn)
+				if err != nil {
+					return err
+				}
 				continue
 			}
 			IsOneFileProcessed = true

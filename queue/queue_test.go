@@ -92,6 +92,10 @@ func (n *nullWorkerTestUnit) GetID() WorkerID {
 	return WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 }
 
+func (n *nullWorkerTestUnit) Close() {
+
+}
+
 func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, withLoging bool) bool {
 	var (
 		log *logging.Logger

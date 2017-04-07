@@ -27,6 +27,8 @@ type Worker interface {
 	ProcessTimeout(*Queue, chan Worker)
 	// Returns unique identifier of the worker
 	GetID() WorkerID
+	// Close is called when queue is finishing work with worker. Here you can close connection to database or etc.
+	Close()
 }
 
 type nullWorkerFactory struct {
@@ -50,6 +52,9 @@ func (n *nullWorker) ProcessTimeout(q *Queue, Next chan Worker) {
 
 func (n *nullWorker) GetID() WorkerID {
 	return n.id
+}
+
+func (n *nullWorker) Close() {
 }
 
 func (n *nullWorkerFactory) CreateWorker() Worker {

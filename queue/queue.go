@@ -32,6 +32,7 @@ type Queue struct {
 	inProcess    *inProcessingPerWorker
 	total        int32
 	totalWorkers uint16
+	lastTimeGC   time.Duration
 }
 
 type newMessageNotificator interface {
@@ -62,6 +63,7 @@ func CreateQueue(Name, StoragePath string, Log Logging, Factory WorkerFactory, O
 		factory:      Factory,
 		name:         Name,
 		stopEvent:    make(chan struct{}),
+		lastTimeGC:   time.Since(startTime),
 	}
 
 	fs, err := createStorage(Name, StoragePath, Log, Options.StorageOptions, Options.InputTimeOut, tmp)
@@ -239,6 +241,12 @@ forloop2:
 		q.totalWorkers--
 	}
 	q.workers, q.tmpworkers = q.tmpworkers, q.workers
+
+	// Process garbage collection here
+	if time.Since(startTime)-q.lastTimeGC > time.Minute {
+		go q.storage.garbageCollect()
+		q.lastTimeGC = time.Since(startTime)
+	}
 }
 
 func (q *Queue) loop() {
@@ -336,6 +344,10 @@ gofor:
 func (q *Queue) close() {
 	q.stopEvent <- struct{}{}
 	<-q.stopedHandle
+	close(q.workers)
+	for w := range q.workers {
+		w.Close()
+	}
 	q.memory.Close()
 	q.storage.Close()
 

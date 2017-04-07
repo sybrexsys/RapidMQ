@@ -9,6 +9,7 @@ import (
 	"os"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -55,7 +56,7 @@ var dot = [1]byte{0}
 type availableRecordInfo struct {
 	Idx      StorageIdx
 	ID       StorageIdx
-	FileInfo fileAccess
+	FileInfo *fileAccess
 
 	FileOffset uint32
 	Length     int32
@@ -100,13 +101,13 @@ var (
 
 // fileStorage is struct for present disk storage of the data
 type fileStorage struct {
-	folder                    string                    // folder where locatd files of the storage
-	log                       Logging                   // log file for store information about actions
-	name                      string                    //name of then storage. At current time used for save to log file only
-	options                   *StorageOptions           // storage options
-	readMutex                 sync.RWMutex              // mutex for work with file handles for output from the sorage
-	readFiles                 map[StorageIdx]fileAccess // map for store read handles of the storage
-	writeFiles                *filequeue                // list of the opened handles for writing
+	folder                    string                     // folder where locatd files of the storage
+	log                       Logging                    // log file for store information about actions
+	name                      string                     //name of then storage. At current time used for save to log file only
+	options                   *StorageOptions            // storage options
+	readMutex                 sync.RWMutex               // mutex for work with file handles for output from the sorage
+	readFiles                 map[StorageIdx]*fileAccess // map for store read handles of the storage
+	writeFiles                *filequeue                 // list of the opened handles for writing
 	idxFile                   *os.File
 	mmapinfo                  mmap.MMap
 	mmapsize                  int64
@@ -118,6 +119,7 @@ type fileStorage struct {
 	lastTimeCheckDeletedFiles time.Duration
 	timeout                   time.Duration
 	notify                    newMessageNotificator
+	immediatlyRelease         int32
 	*indexFileHeader
 }
 
@@ -125,22 +127,25 @@ type fileStorage struct {
 func (fs *fileStorage) newID() (StorageIdx, error) {
 	if fs.TotalRecord == uint64(len(fs.idx)-1) {
 		// Check possibility to move index for processed elements of the index
-		if !fs.checkFreeIndexRecords(true) {
-			fs.mmapinfo.Unmap()
-			indexFileSize, err := fs.calculateNextSize(fs.mmapsize + 1)
-			if err != nil {
-				fs.idxFile.Close()
-				return InvalidIdx, err
+		if ok, err := fs.checkFreeIndexRecords(true); err == nil {
+			if !ok {
+				fs.mmapinfo.Unmap()
+				indexFileSize, err := fs.calculateNextSize(fs.mmapsize + 1)
+				fs.idxFile.Seek(indexFileSize-1, 0)
+				fs.idxFile.Write(dot[0:1])
+				fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
+				if err != nil {
+					err1 := fs.idxFile.Close()
+					if err1 != nil {
+						return InvalidIdx, err1
+					}
+					return InvalidIdx, err
+				}
+				fs.mmapsize = indexFileSize
+				fs.setMMapInfo()
 			}
-			fs.idxFile.Seek(indexFileSize-1, 0)
-			fs.idxFile.Write(dot[0:1])
-			fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
-			if err != nil {
-				fs.idxFile.Close()
-				return InvalidIdx, err
-			}
-			fs.mmapsize = indexFileSize
-			fs.setMMapInfo()
+		} else {
+			return InvalidIdx, err
 		}
 	}
 	idx := StorageIdx(fs.TotalRecord) + fs.MinIndex
@@ -167,7 +172,7 @@ func (fs *fileStorage) RecordsSize() uint64 {
 func (fs *fileStorage) Count() uint64 {
 	fs.idxMutex.Lock()
 	defer fs.idxMutex.Unlock()
-	return fs.TotalRecord - fs.TotalFree
+	return uint64(fs.TotalRecord) - fs.TotalFree
 }
 
 // description is used in logging system for detect source of the processing message
@@ -179,7 +184,6 @@ func (fs *fileStorage) description() string {
 //Possible unmark this record as Enabled with  UnlockRecord function or
 // mark record as free with FreeRecord function
 func (fs *fileStorage) getNext() (*availableRecordInfo, error) {
-	var err error
 	firstSkiped := InvalidIdx
 	lastFree := InvalidIdx
 	NextDuration := time.Duration(0x7FFFFFFFFFFFFFFF)
@@ -198,7 +202,8 @@ func (fs *fileStorage) getNext() (*availableRecordInfo, error) {
 			if fs.options.SkipReturnedRecords && fs.idx[i].TryCount > 0 {
 				//Check record to overdue timeout to current time
 				CurrentTime := time.Since(startTime)
-				TmpDuration := fs.idx[i].LastAction + time.Duration(fs.options.SkipDelayPerTry)*time.Duration(fs.idx[i].TryCount)*time.Millisecond
+				TmpDuration := fs.idx[i].LastAction + time.Duration(fs.options.SkipDelayPerTry)*
+					time.Duration(fs.idx[i].TryCount)*time.Millisecond
 				if TmpDuration >= CurrentTime {
 					if TmpDuration < NextDuration {
 						NextDuration = TmpDuration
@@ -219,37 +224,10 @@ func (fs *fileStorage) getNext() (*availableRecordInfo, error) {
 				Length:     fs.idx[i].Length,
 				ID:         fs.idx[i].ID,
 			}
-			var (
-				file fileAccess
-				ok   bool
-			)
 			FileIdx := fs.idx[i].FileIndex
-			// get open file handle for read record
-			fs.readMutex.RLock()
-			file, ok = fs.readFiles[FileIdx]
-			fs.readMutex.RUnlock()
-			if !ok {
-				file.Handle, err = os.Open(fs.folder + dataFileNameByID(FileIdx))
-				if err != nil {
-					fs.log.Error("[QFS:%s:%d] Cannot open datafile {%d}  Error:[%s]", fs.name, tmp.ID, FileIdx, err.Error())
-					return nil, err
-				}
-				fs.log.Trace("[QFS:%s:%d] Was opened datafile {%d}", fs.name, tmp.ID, FileIdx)
-				file.Mutex = &sync.Mutex{}
-				fs.readMutex.Lock()
-
-				// Check count of the opened files and if exceed remove one open handle from the map
-				if int16(len(fs.readFiles)) > fs.options.MaxOneTimeOpenedFiles {
-					for k, vak := range fs.readFiles {
-						vak.Lock()
-						vak.Handle.Close()
-						vak.Unlock()
-						delete(fs.readFiles, k)
-						break
-					}
-				}
-				fs.readFiles[FileIdx] = file
-				fs.readMutex.Unlock()
+			file, err := fs.getReadHandle(tmp.ID, FileIdx)
+			if err != nil {
+				return nil, err
 			}
 			fs.idx[i].State = stateInProcess
 			tmp.FileInfo = file
@@ -271,6 +249,39 @@ func (fs *fileStorage) getNext() (*availableRecordInfo, error) {
 	}
 }
 
+func (fs *fileStorage) getReadHandle(recID, fileIdx StorageIdx) (*fileAccess, error) {
+	// get open file handle for read record
+	fs.readMutex.RLock()
+	file, ok := fs.readFiles[fileIdx]
+	fs.readMutex.RUnlock()
+	var err error
+	if !ok {
+		file = &fileAccess{}
+		file.Handle, err = os.Open(fs.folder + dataFileNameByID(fileIdx))
+		if err != nil {
+			fs.log.Error("[QFS:%s:%d] Cannot open datafile {%d}  Error:[%s]", fs.name, recID, fileIdx, err.Error())
+			return nil, err
+		}
+		fs.log.Trace("[QFS:%s:%d] Was opened datafile {%d}", fs.name, recID, fileIdx)
+		file.Mutex = &sync.Mutex{}
+		fs.readMutex.Lock()
+
+		// Check count of the opened files and if exceed remove one open handle from the map
+		if int16(len(fs.readFiles)) > fs.options.MaxOneTimeOpenedFiles {
+			for k, vak := range fs.readFiles {
+				vak.Lock()
+				vak.Handle.Close()
+				vak.Unlock()
+				delete(fs.readFiles, k)
+				break
+			}
+		}
+		fs.readFiles[fileIdx] = file
+		fs.readMutex.Unlock()
+	}
+	return file, nil
+}
+
 // Get returns next available record from the storage
 func (fs *fileStorage) Get() (*Message, error) {
 	var buf []byte
@@ -282,7 +293,10 @@ func (fs *fileStorage) Get() (*Message, error) {
 		}
 		// if is not valid message we remove it from queue
 		if buf = fs.getValidRecord(ai.FileInfo, ai.ID, ai.FileOffset, ai.Length); buf == nil {
-			fs.freeRecord(ai.Idx)
+			err = fs.freeRecord(ai.Idx)
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
 		tmp := &Message{
@@ -323,7 +337,10 @@ func (fs *fileStorage) checkUnusedFiles() {
 			fs.readMutex.Lock()
 			file, ok := fs.readFiles[FileIdx]
 			if ok {
-				file.Handle.Close()
+				err := file.Handle.Close()
+				if err != nil {
+					fs.log.Error("Try close file handle with errors %s ", err.Error())
+				}
 				file.Handle = nil
 				delete(fs.readFiles, FileIdx)
 			}
@@ -399,10 +416,6 @@ func (fs *fileStorage) calculateNextSize(CurrentSize int64) (int64, error) {
 			return 1 << i, nil
 		}
 	}
-	// TODO: Raise error wher index file will be more then 2 Gb for Windows OS ( 32 bits)
-	//	if size > maxMapSize {
-	//		return 0, fmt.Errorf("mmap too large")
-	//	}
 	return CurrentSize + 1<<30, nil
 }
 
@@ -420,20 +433,17 @@ func (fs *fileStorage) prepareIndexFile() error {
 	isNewFile := (indexFileSize == 0)
 	if isNewFile {
 		indexFileSize, err = fs.calculateNextSize(0)
-		if err != nil {
-			return err
-		}
 		fs.idxFile.Seek(indexFileSize-1, 0)
 		fs.idxFile.Write(dot[0:1])
 	} else {
 		indexFileSize, err = fs.calculateNextSize(indexFileSize)
-		if err != nil {
-			return err
-		}
 	}
 	fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
 	if err != nil {
-		fs.idxFile.Close()
+		err1 := fs.idxFile.Close()
+		if err1 != nil {
+			return err1
+		}
 		return err
 	}
 	fs.mmapsize = indexFileSize
@@ -481,18 +491,20 @@ func (fs *fileStorage) loadIndexFile() error {
 	if err != nil {
 		path := fs.folder[:len(fs.folder)-1]
 		listFiles, err := ioutil.ReadDir(path)
-		if err == nil {
-			for _, finfo := range listFiles {
-				if finfo.IsDir() {
-					continue
-				}
-				fname := finfo.Name()
-				if checkValidFileDataName(fname) != -1 {
-					return errors.New("index was not found")
-				}
-				os.Remove(fs.folder + fname)
-			}
+		if err != nil {
+			return err
 		}
+		for _, finfo := range listFiles {
+			if finfo.IsDir() {
+				continue
+			}
+			fname := finfo.Name()
+			if checkValidFileDataName(fname) != -1 {
+				return errors.New("index was not found")
+			}
+			os.Remove(fs.folder + fname)
+		}
+
 	}
 	fs.prepareIndexFile()
 	fs.deleteUnusedFiles()
@@ -516,7 +528,7 @@ func (fs *fileStorage) checkFlush() {
 }
 
 // checkValidRecord checks validity of the record
-func (fs *fileStorage) getValidRecord(file fileAccess, index StorageIdx, offset uint32, length int32) []byte {
+func (fs *fileStorage) getValidRecord(file *fileAccess, index StorageIdx, offset uint32, length int32) []byte {
 	var buff [16]byte
 	file.Lock()
 	defer file.Unlock()
@@ -553,7 +565,7 @@ func (fs *fileStorage) getValidRecord(file fileAccess, index StorageIdx, offset 
 }
 
 // checkFreeIndexRecords checks count of the free records in the top of the index table and removes such records
-func (fs *fileStorage) checkFreeIndexRecords(IsIncrementIndex bool) bool {
+func (fs *fileStorage) checkFreeIndexRecords(IsIncrementIndex bool) (bool, error) {
 	var Frees uint64
 	for i := uint64(0); i < fs.TotalRecord; i++ {
 		if fs.idx[i].State == stateFree {
@@ -565,7 +577,7 @@ func (fs *fileStorage) checkFreeIndexRecords(IsIncrementIndex bool) bool {
 	percents := uint8(100 * Frees / uint64(len(fs.idx)))
 	if (IsIncrementIndex && percents < fs.options.PercentFreeForRecalculateOnIncrementIndexFile) ||
 		percents < fs.options.PercentFreeForRecalculateOnExit {
-		return false
+		return false, nil
 	}
 	fs.flush()
 	copy(fs.idx[0:], fs.idx[Frees:fs.TotalRecord])
@@ -574,13 +586,23 @@ func (fs *fileStorage) checkFreeIndexRecords(IsIncrementIndex bool) bool {
 	fs.log.Trace("[QFS:%s] Total free count %d", fs.name, fs.TotalFree)
 	fs.MinIndex += StorageIdx(Frees)
 	fs.startIdx = 0
-	/*
-		for i := uint64(1); i <= Frees && newidx+i < uint64(len(fs.idx)); i++ {
-			fs.idx[newidx+i] = indexRecord{}
-		}
-		fs.idx[newidx] = lastRecord*/
 	fs.flush()
-	return true
+	needSize := int64(unsafe.Sizeof(fs.idx[0]))*int64(fs.TotalRecord)*120/100 + int64(unsafe.Sizeof(*fs.indexFileHeader))
+	testSize, _ := fs.calculateNextSize(needSize)
+	if testSize >= fs.mmapsize {
+		return true, nil
+	}
+	fs.mmapinfo.Unmap()
+	fs.idxFile.Truncate(testSize)
+	var err error
+	fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(testSize), mmap.RDWR, 0, 0)
+	if err != nil {
+		fs.idxFile.Close()
+		return true, err
+	}
+	fs.mmapsize = testSize
+	fs.setMMapInfo()
+	return true, nil
 }
 
 //put appends one message to storage and marks state in depend of the option
@@ -590,7 +612,7 @@ func (fs *fileStorage) put(buffer []byte, option int) (StorageIdx, error) {
 		tmp    indexRecord
 		offset int64
 	)
-
+	atomic.StoreInt32(&fs.immediatlyRelease, 1)
 	fs.idxMutex.Lock()
 	Idx, err := fs.newID()
 	if err != nil {
@@ -662,7 +684,7 @@ func createStorage(StorageName, StorageLocation string, Log Logging, Options *St
 		log:                       Log,
 		options:                   Options,
 		freeCounts:                make(map[StorageIdx]int64),
-		readFiles:                 make(map[StorageIdx]fileAccess),
+		readFiles:                 make(map[StorageIdx]*fileAccess),
 		lastTimeCheckDeletedFiles: time.Since(startTime),
 		timeout:                   TimeOut,
 		notify:                    Notity,
@@ -678,36 +700,53 @@ func createStorage(StorageName, StorageLocation string, Log Logging, Options *St
 		}
 	}
 	Log.Info("[fileStorage][%s] was created successful...", StorageName)
+	err = tmp.garbageCollect()
+	if err != nil {
+		return nil, err
+	}
 	return tmp, nil
 }
 
 // close closes all interhal opened handles
-func (fs *fileStorage) close() {
+func (fs *fileStorage) close() (err error) {
 	if fs.mmapinfo != nil {
-		fs.mmapinfo.Unmap()
-		fs.idxFile.Close()
+		err = fs.mmapinfo.Unmap()
+		if err != nil {
+			return err
+		}
+		err = fs.idxFile.Close()
+		if err != nil {
+			return err
+		}
 		fs.mmapinfo = nil
 		fs.idxFile = nil
 	}
 	fs.readMutex.Lock()
 	for _, k := range fs.readFiles {
 		k.Lock()
-		k.Handle.Close()
+		err = k.Handle.Close()
+		if err != nil {
+			return err
+		}
 		k.Unlock()
 	}
 	fs.readFiles = nil
 	fs.readMutex.Unlock()
 	fs.writeFiles.free()
+	return nil
 }
 
 // Close closes file storage
-func (fs *fileStorage) Close() {
+func (fs *fileStorage) Close() (err error) {
 	fs.log.Info("[QFS:%s] is closed... Record count is %d", fs.name, fs.TotalRecord-fs.TotalFree)
 	fs.checkFreeIndexRecords(false)
-	fs.close()
+	err = fs.close()
+	if err != nil {
+		return err
+	}
 	fs.checkUnusedFiles()
 	fs.log.Info("[QFS:%s] was closed successful...", fs.name)
-	return
+	return nil
 }
 
 func (fs *fileStorage) info() {
