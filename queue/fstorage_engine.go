@@ -18,7 +18,7 @@ import (
 
 var startTime = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// InvalidIdx is Invalid index description
+// InvalidIdx id Invalid index description
 const InvalidIdx StorageIdx = 0xFFFFFFFFFFFFFFFF
 
 var magicNumberDataPrefix = uint32(0x67452301)
@@ -283,7 +283,7 @@ func (fs *fileStorage) getReadHandle(recID, fileIdx StorageIdx) (*fileAccess, er
 }
 
 // Get returns next available record from the storage
-func (fs *fileStorage) Get() (*Message, error) {
+func (fs *fileStorage) Get() (*QueueItem, error) {
 	var buf []byte
 
 	for {
@@ -299,8 +299,12 @@ func (fs *fileStorage) Get() (*Message, error) {
 			}
 			continue
 		}
-		tmp := &Message{
-			Buffer:  buf,
+		stream, err := bufToStream(buf)
+		if err != nil {
+			return nil, err
+		}
+		tmp := &QueueItem{
+			Stream:  stream,
 			ID:      ai.ID,
 			idx:     ai.Idx,
 			storage: fs,
@@ -440,10 +444,7 @@ func (fs *fileStorage) prepareIndexFile() error {
 	}
 	fs.mmapinfo, err = mmap.MapRegion(fs.idxFile, int(indexFileSize), mmap.RDWR, 0, 0)
 	if err != nil {
-		err1 := fs.idxFile.Close()
-		if err1 != nil {
-			return err1
-		}
+		fs.idxFile.Close()
 		return err
 	}
 	fs.mmapsize = indexFileSize
@@ -458,6 +459,8 @@ func (fs *fileStorage) prepareIndexFile() error {
 		fs.TotalFree = 0
 	} else {
 		if fs.MagicNumber != magicNumberValue {
+			fs.mmapinfo.Unmap()
+			fs.idxFile.Close()
 			return errors.New("invalid index file")
 		}
 	}
@@ -488,7 +491,19 @@ func (fs *fileStorage) prepareIndexFile() error {
 func (fs *fileStorage) loadIndexFile() error {
 	indexFileName := fs.folder + "index.dat"
 	_, err := os.Stat(indexFileName)
-	if err != nil {
+	if err == nil {
+		err = fs.prepareIndexFile()
+		if err == nil {
+			return nil
+		}
+		if !fs.options.DeleteInvalidIndexFile {
+			return err
+		}
+		err1 := os.Remove(indexFileName)
+		if err1 != nil {
+			return errors.New("Cannot delete invalid index file")
+		}
+	} else {
 		path := fs.folder[:len(fs.folder)-1]
 		listFiles, err := ioutil.ReadDir(path)
 		if err != nil {
@@ -504,11 +519,9 @@ func (fs *fileStorage) loadIndexFile() error {
 			}
 			os.Remove(fs.folder + fname)
 		}
-
+		return fs.prepareIndexFile()
 	}
-	fs.prepareIndexFile()
-	fs.deleteUnusedFiles()
-	return nil
+	return err
 }
 
 //flush does sync of the memory mapped file with disk file
@@ -692,14 +705,15 @@ func createStorage(StorageName, StorageLocation string, Log Logging, Options *St
 	tmp.writeFiles = createIOQueue(tmp)
 	err := tmp.loadIndexFile()
 	if err != nil {
-		tmp.log.Error("[fileStorage][%s] Cannot create:%s", StorageName, err.Error())
+		tmp.log.Error("[QFS:%s] Cannot create:%s", StorageName, err.Error())
 		err = tmp.restoreIndexFile()
 		if err != nil {
-			tmp.log.Error("[fileStorage][%s] Cannot restore:%s", StorageName, err.Error())
+			tmp.log.Error("[QFS:%s] Cannot restore:%s", StorageName, err.Error())
 			return nil, err
 		}
 	}
-	Log.Info("[fileStorage][%s] was created successful...", StorageName)
+	tmp.deleteUnusedFiles()
+	Log.Info("[QFS:%s] was created successful...", StorageName)
 	err = tmp.garbageCollect()
 	if err != nil {
 		return nil, err
@@ -738,6 +752,9 @@ func (fs *fileStorage) close() (err error) {
 
 // Close closes file storage
 func (fs *fileStorage) Close() (err error) {
+	atomic.StoreInt32(&fs.immediatlyRelease, 1)
+	fs.idxMutex.Lock()
+	fs.idxMutex.Unlock()
 	fs.log.Info("[QFS:%s] is closed... Record count is %d", fs.name, fs.TotalRecord-fs.TotalFree)
 	fs.checkFreeIndexRecords(false)
 	err = fs.close()

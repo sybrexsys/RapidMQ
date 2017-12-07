@@ -27,6 +27,9 @@ type StorageOptions struct {
 
 	// Count of the one time opened for reading and for writing files. Open files are counting separately
 	MaxOneTimeOpenedFiles int16
+
+	// If queue index file is corrupted then will recreate index file and try to restore ,essages information
+	DeleteInvalidIndexFile bool
 }
 
 //Options holds the optional parameters for the managing of the messages.
@@ -63,6 +66,7 @@ var DefaultStorageOptions = StorageOptions{
 	SkipDelayPerTry:                               500,
 	CheckCRCOnRead:                                false,
 	MaxOneTimeOpenedFiles:                         12,
+	DeleteInvalidIndexFile:                        true,
 }
 
 // DefaultQueueOptions is default options for queue

@@ -1,7 +1,9 @@
 package queue
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -28,6 +30,15 @@ var TestStrings = [10]string{
 	"Ten",
 }
 
+func readString(r io.Reader) string {
+	if r == nil {
+		return ""
+	}
+	buf := bufio.NewScanner(r)
+	buf.Scan()
+	return buf.Text()
+}
+
 func MySleep(ms time.Duration) {
 	m := time.After(ms * time.Millisecond)
 	<-m
@@ -39,7 +50,44 @@ func TestCreateNewStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
+}
+
+func TestDecreaseSizeOfIndexFile(t *testing.T) {
+
+	clearTestFolder()
+	fs, err := createStorage("Test", TestFolder, nil, nil, 0, nil)
+	if err != nil {
+		t.Fatalf("Cannot create storage: %s", err)
+	}
+	var buffer [50000]byte
+	for i := 0; i < 2000; i++ {
+		fs.Put(buffer[:])
+	}
+	i := 0
+	var z *QueueItem
+	for i = 0; i < 2000; i++ {
+		z, err = fs.Get()
+		if err != nil {
+			t.Fatalf("Error reading from storage: %s", err)
+		}
+		fs.FreeRecord(z.idx)
+	}
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
+	stat, err1 := os.Stat(TestFolder + "index.dat")
+	if err1 != nil {
+		t.Fatalf("Index file was not found")
+	}
+	if stat.Size() > 1<<15 {
+		t.Fatalf("Index file is very large")
+	}
+
 }
 
 func TestFillStorage(t *testing.T) {
@@ -54,7 +102,10 @@ func TestFillStorage(t *testing.T) {
 	for i := 0; i < 7; i++ {
 		fs.Put(buffer[:])
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 	_, err = os.Stat(TestFolder + "index.dat")
 	if err != nil {
 		t.Fatalf("Not found index file: %s", err)
@@ -92,7 +143,10 @@ func TestFillIncrementIndex(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		fs.Put(buffer[:])
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 	stat, err = os.Stat(TestFolder + "index.dat")
 	if err != nil {
 		t.Fatalf("Not found index file: %s", err)
@@ -104,7 +158,8 @@ func TestFillIncrementIndex(t *testing.T) {
 }
 
 func TestFillingData(t *testing.T) {
-	var z *Message
+
+	var z *QueueItem
 
 	clearTestFolder()
 	options := DefaultStorageOptions
@@ -140,7 +195,7 @@ func TestFillingData(t *testing.T) {
 	}
 	odd := 0
 	for z, err = fs.Get(); err == nil; z, err = fs.Get() {
-		if TestStrings[odd] != string(z.Buffer) {
+		if TestStrings[odd] != readString(z.Stream) {
 			t.Fatalf("Invalid value of the storage\n")
 		}
 		odd++
@@ -150,18 +205,24 @@ func TestFillingData(t *testing.T) {
 			t.Fatalf("Error reading from storage: %s", err)
 		}
 	}
-	fs.Close()
-
+	fs.info()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 	fs, err = createStorage("Test", TestFolder, nil, &options, 0, nil)
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
 	odd = 0
-	for z, err = fs.Get(); err == nil; z, err = fs.Get() {
-		if TestStrings[odd] != string(z.Buffer) {
+	for z, _ := fs.Get(); err == nil; z, err = fs.Get() {
+		if TestStrings[odd] != readString(z.Stream) {
 			t.Fatalf("Invalid value of the storage\n")
 		}
-		fs.FreeRecord(z.idx)
+		err = fs.FreeRecord(z.idx)
+		if err != nil {
+			t.Fatalf("Error free record: %s", err)
+		}
 		odd++
 	}
 	if err != nil {
@@ -183,11 +244,15 @@ func TestFillingData(t *testing.T) {
 		t.Fatalf("Not release full storage: ")
 
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestWorkWithReleaseRecord(t *testing.T) {
-	var z *Message
+
+	var z *QueueItem
 	clearTestFolder()
 	fs, err := createStorage("Test", TestFolder, nil, nil, 0, nil)
 	if err != nil {
@@ -196,20 +261,23 @@ func TestWorkWithReleaseRecord(t *testing.T) {
 	for _, k := range TestStrings {
 		fs.Put([]byte(k))
 	}
-	z, _ = fs.Get()
+	z, err = fs.Get()
 	fs.UnlockRecord(z.idx)
-	z, _ = fs.Get()
-	testString := string(z.Buffer)
+	z, err = fs.Get()
+	testString := readString(z.Stream)
 	if TestStrings[1] != testString {
 		t.Fatalf("Invalid value in the storage. Returned: %s  Must return second elementh because first is busy yet", testString)
 	}
 	MySleep(500)
-	z, _ = fs.Get()
-	zz := string(z.Buffer)
+	z, err = fs.Get()
+	zz := readString(z.Stream)
 	if TestStrings[0] != zz {
 		t.Fatalf("Invalid value in the storage : %s.  Must return first element because timeout expired ", zz)
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestWorkStorageSize(t *testing.T) {
@@ -232,12 +300,14 @@ func TestWorkStorageSize(t *testing.T) {
 		t.Fatalf("Invalid value of the storage\n")
 	}
 	fs.info()
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestFillDeleteUnusedDataFiles(t *testing.T) {
 	var buffer [2000]byte
-	var z *Message
 	clearTestFolder()
 	zzz := 99
 	options := DefaultStorageOptions
@@ -251,23 +321,32 @@ func TestFillDeleteUnusedDataFiles(t *testing.T) {
 		fs.Put(buffer[:])
 	}
 	for i := 0; i < zzz-2; i++ {
-		z, err = fs.Get()
+		z, err := fs.Get()
 		if err != nil {
 			t.Fatalf("Error reading from storage: %s", err)
 		}
-		fs.FreeRecord(z.idx)
+		err = fs.FreeRecord(z.idx)
+		if err != nil {
+			t.Fatalf("Error free record: %s", err)
+		}
+	}
+	z, err := fs.Get()
+	if err != nil {
+		t.Fatalf("Error reading from storage: %s", err)
+	}
+	err = fs.FreeRecord(z.idx)
+	if err != nil {
+		t.Fatalf("Error free record: %s", err)
 	}
 	z, err = fs.Get()
 	if err != nil {
 		t.Fatalf("Error reading from storage: %s", err)
 	}
 	fs.FreeRecord(z.idx)
-	z, err = fs.Get()
+	err = fs.Close()
 	if err != nil {
-		t.Fatalf("Error reading from storage: %s", err)
+		t.Fatalf("Cannot close storage: %s", err)
 	}
-	fs.FreeRecord(z.idx)
-	fs.Close()
 	_, err = os.Stat(TestFolder + "stg00000.dat")
 	if err == nil {
 		t.Fatalf("File with unused data was not delete")
@@ -275,7 +354,8 @@ func TestFillDeleteUnusedDataFiles(t *testing.T) {
 }
 
 func TestErrors(t *testing.T) {
-	var z *Message
+
+	var z *QueueItem
 	clearTestFolder()
 	fs, err := createStorage("Test", TestFolder, nil, nil, 0, nil)
 	if err != nil {
@@ -287,7 +367,10 @@ func TestErrors(t *testing.T) {
 		}
 		fs.Put([]byte(k))
 	}
-	z, _ = fs.Get()
+	z, err = fs.Get()
+	if err != nil {
+		t.Fatalf("Cannot receive item. Err: %v", err)
+	}
 	fs.UnlockRecord(z.idx)
 	z, err = fs.Get()
 	if err != nil {
@@ -307,7 +390,10 @@ func TestErrors(t *testing.T) {
 	} else {
 		t.Fatalf("Must create filestorage error")
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestParralels(t *testing.T) {
@@ -340,7 +426,10 @@ func TestParralels(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestWorkStorageCheckMoveErroredMessages(t *testing.T) {
@@ -349,14 +438,39 @@ func TestWorkStorageCheckMoveErroredMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
-	fs.Put(make([]byte, 1000))
-	fs.Put(make([]byte, 1000))
-	fs.Put(make([]byte, 1000))
-	a, _ := fs.Get()
-	b, _ := fs.Get()
-	fs.UnlockRecord(a.idx)
-	fs.FreeRecord(b.idx)
-	fs.Get()
+
+	_, err = fs.Put(make([]byte, 1000))
+	if err != nil {
+		t.Fatalf("Cannot put to storage: %s", err)
+	}
+	_, err = fs.Put(make([]byte, 1000))
+	if err != nil {
+		t.Fatalf("Cannot put to storage: %s", err)
+	}
+	_, err = fs.Put(make([]byte, 1000))
+	if err != nil {
+		t.Fatalf("Cannot put to storage: %s", err)
+	}
+	a, err := fs.Get()
+	if err != nil {
+		t.Fatalf("Cannot get from storage: %s", err)
+	}
+	b, err := fs.Get()
+	if err != nil {
+		t.Fatalf("Cannot get from storage: %s", err)
+	}
+	err = fs.UnlockRecord(a.idx)
+	if err != nil {
+		t.Fatalf("Cannot unlock record: %s", err)
+	}
+	err = fs.FreeRecord(b.idx)
+	if err != nil {
+		t.Fatalf("Cannot free record: %s", err)
+	}
+	_, err = fs.Get()
+	if err != nil {
+		t.Fatal("Must not be error. C element must be returned")
+	}
 	_, err = fs.Get()
 	if err == nil {
 		t.Fatal("Must be error. 'Will available when' must be")
@@ -366,7 +480,6 @@ func TestWorkStorageCheckMoveErroredMessages(t *testing.T) {
 	if !ok || myerr.ErrorType != errorInDelay {
 		t.Fatalf("Must be internal error. 'Will available when' must be. Found:%s", e)
 	}
-
 	time.Sleep(myerr.NextAvailable)
 	a, err = fs.Get()
 	if err != nil {
@@ -375,7 +488,10 @@ func TestWorkStorageCheckMoveErroredMessages(t *testing.T) {
 	if a.idx != 1 {
 		t.Fatalf("Must be return index value 1, returned: %d", a.idx)
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 func TestWorkStorageRestore(t *testing.T) {
@@ -387,7 +503,10 @@ func TestWorkStorageRestore(t *testing.T) {
 	for _, k := range TestStrings {
 		fs.Put([]byte(k))
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 	os.Remove(TestFolder + "index.dat")
 	Handle, _ := os.Create(TestFolder + dataFileNameByID(100))
 	Handle.Close()
@@ -400,7 +519,10 @@ func TestWorkStorageRestore(t *testing.T) {
 	if fs.Count() != uint64(len(TestStrings)) {
 		t.Fatalf("Put %d messages. Restored: %d", len(TestStrings), fs.Count())
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 	Handle, _ = os.Create(TestFolder + dataFileNameByID(100))
 	Handle.Close()
 	Handle, _ = os.Create(TestFolder + "test" + dataFileNameByID(100))
@@ -413,7 +535,10 @@ func TestWorkStorageRestore(t *testing.T) {
 	if fs.Count() != uint64(len(TestStrings)) {
 		t.Fatalf("Put %d messages. Restored: %d", len(TestStrings), fs.Count())
 	}
-	fs.Close()
+	err = fs.Close()
+	if err != nil {
+		t.Fatalf("Cannot close storage: %s", err)
+	}
 }
 
 var TestFolder string

@@ -7,7 +7,6 @@ import (
 )
 
 type calcsize struct {
-	cnt      int
 	size     int64
 	realsize int64
 }
@@ -36,16 +35,24 @@ func (fs *fileStorage) garbageCollect() error {
 		return nil
 	}
 	fs.log.Trace("[Q:%s] Garbage collection is started", fs.name)
+	fs.writeFiles.clear()
+	fs.checkUnusedFiles()
 	needProcess := make(map[StorageIdx]*calcsize)
-	for k := range fs.freeCounts {
+	for k, cnt := range fs.freeCounts {
 		fileinfo, err := os.Stat(fs.folder + dataFileNameByID(k))
 		if err != nil {
 			continue
 		}
+		rs := fileinfo.Size()
+		if rs < fs.options.MaxDataFileSize/20 {
+			continue
+		}
+		if cnt < 100 {
+			continue
+		}
 		needProcess[k] = &calcsize{
-			cnt:      0,
 			size:     0,
-			realsize: fileinfo.Size() / 10,
+			realsize: rs / 10,
 		}
 	}
 	// Calculate list of the files where count of the valid records bellow then 10 % of size of file
@@ -58,8 +65,8 @@ func (fs *fileStorage) garbageCollect() error {
 		if !ok {
 			continue
 		}
-		cur.cnt++
 		cur.size += int64(fs.idx[i].Length)
+		cur.size += 20
 		if cur.realsize < cur.size {
 			delete(needProcess, fileidx)
 		}
@@ -100,16 +107,18 @@ func (fs *fileStorage) garbageCollect() error {
 }
 
 func (fs *fileStorage) getNextFreeIndex() StorageIdx {
-	for i := StorageIdx(0); i < fs.MinIndex+StorageIdx(i); i++ {
+	i := StorageIdx(0)
+	for {
 		if _, ok := fs.freeCounts[i]; !ok {
 			return i
 		}
+		i++
 	}
-	return InvalidIdx
 }
 
 func (fs *fileStorage) moveOneRecord(idx uint64, gi *garbageCollectInfo) error {
-	nidx := StorageIdx(InvalidIdx)
+	nidx := StorageIdx(0)
+
 	if gi.file.Handle == nil {
 		nidx = fs.getNextFreeIndex()
 	} else {
@@ -118,15 +127,13 @@ func (fs *fileStorage) moveOneRecord(idx uint64, gi *garbageCollectInfo) error {
 			return err
 		}
 		if sz+int64(fs.idx[idx].Length) > fs.options.MaxDataFileSize {
-
+			gi.file.Handle.Close()
+			fs.freeCounts[gi.fileIndex] = gi.recCount
 			nidx = fs.getNextFreeIndex()
 		}
 	}
-	if nidx != InvalidIdx {
-		if gi.fileIndex != InvalidIdx {
-			fs.freeCounts[gi.fileIndex] = gi.recCount
-			gi.file.Handle.Close()
-		}
+
+	if nidx != 0 {
 		gi.fileIndex = nidx
 		datFileName := fs.folder + dataFileNameByID(nidx)
 		f, err := os.Create(datFileName)
@@ -139,6 +146,7 @@ func (fs *fileStorage) moveOneRecord(idx uint64, gi *garbageCollectInfo) error {
 		gi.file.Handle = f
 		gi.recCount = 0
 	}
+
 	oldFileIdx := fs.idx[idx].FileIndex
 	fl, err := fs.getReadHandle(fs.idx[idx].ID, oldFileIdx)
 	if err != nil {

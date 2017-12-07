@@ -4,15 +4,18 @@ package queue
 //TODO: for empty list skip size of theindex file
 
 import (
+	"encoding/binary"
+	"io"
 	"runtime"
+	"sync/atomic"
 	"time"
 )
 
-//Message is the structure that will be sent to worker for processing
-type Message struct {
+// QueueItem is elementh of the queue
+type QueueItem struct { // nolint
 	idx     StorageIdx
 	ID      StorageIdx
-	Buffer  []byte
+	Stream  io.ReadSeeker
 	storage storageProcessing
 }
 
@@ -31,7 +34,7 @@ type Queue struct {
 	factory      WorkerFactory
 	inProcess    *inProcessingPerWorker
 	total        int32
-	totalWorkers uint16
+	totalWorkers int32
 	lastTimeGC   time.Duration
 }
 
@@ -79,12 +82,21 @@ func CreateQueue(Name, StoragePath string, Log Logging, Factory WorkerFactory, O
 	if Factory.NeedTimeoutProcessing() {
 		tmp.tmpworkers = make(chan Worker, Options.MaximumWorkersCount)
 	}
-	for i := uint16(0); i < Options.MinimunWorkersCount; i++ {
-		newReader := Factory.CreateWorker()
-		tmp.workers <- newReader
-		tmp.log.Trace("[Q:%s] New reader (%d) was created.", tmp.name, newReader.GetID())
+
+	if Factory.CanCreateWorkers() {
+		for i := uint16(0); i < Options.MinimunWorkersCount; i++ {
+			newWorker, err := Factory.CreateWorker()
+			if err != nil {
+				tmp.log.Trace("[Q:%s] New worker was not created. Error:%s", tmp.name, err.Error())
+			} else {
+				tmp.workers <- newWorker
+				tmp.log.Trace("[Q:%s] [W:%d] New worker was created.", tmp.name, newWorker.GetID())
+			}
+		}
+		tmp.totalWorkers = int32(len(tmp.workers))
+	} else {
+		tmp.totalWorkers = 0
 	}
-	tmp.totalWorkers = Options.MinimunWorkersCount
 	tmp.inProcess = createInProcessing(tmp, Options.MinimunWorkersCount, Options.MaximumMessagesPerWorker)
 
 	Log.Trace("[Q:%s] Initial count of the workers is %d", Name, len(tmp.workers))
@@ -105,13 +117,17 @@ func (q *Queue) newMessageNotification() {
 	}
 }
 
-func (q *Queue) getOneItemFromStorage() (*Message, error) {
+func (q *Queue) getOneItemFromStorage() (*QueueItem, error) {
 	MemData, err := q.memory.Get()
 	if err == nil {
-		fw := &Message{
+		stream, err := bufToStream(MemData.buf)
+		if err != nil {
+			return nil, err
+		}
+		fw := &QueueItem{
 			idx:     MemData.idx,
 			ID:      MemData.idx,
-			Buffer:  MemData.buf,
+			Stream:  stream,
 			storage: q.memory,
 		}
 		return fw, nil
@@ -122,9 +138,15 @@ func (q *Queue) getOneItemFromStorage() (*Message, error) {
 // Process must be called from the worker of the message. In depends
 // of the `isOk` parameter either messages are deleting from the queue
 // or are marking as faulty and again processing after some timeout
-func (q *Queue) Process(worker WorkerID, isOk bool) {
+func (q *Queue) process(worker WorkerID, isOk bool) {
 	q.log.Trace("[Q:%s] Receiver answer from worker (%d) [%v]", q.name, worker, isOk)
 	q.inProcess.processList(worker, isOk)
+}
+
+func (q *Queue) dropWorker(worker WorkerID) {
+	q.log.Trace("[Q:%s] [W:%d] Dropping worker", q.name, worker)
+	q.inProcess.processList(worker, false)
+	atomic.AddInt32(&q.totalWorkers, -1)
 }
 
 //Count returns the count of the messages in the queue
@@ -137,6 +159,29 @@ func (q *Queue) Count() uint64 {
 // disk only if timeout is expired shortly. Returns false if aren't processing / writing of the message
 // in the during of the timeout or has some problems with  writing to disk
 func (q *Queue) Insert(buf []byte) bool {
+	if q.options.InputTimeOut == 0 {
+		return q.insert(buf, nil)
+	}
+	var timeoutch <-chan time.Time
+	ch := make(chan bool, 1)
+	go q.insert(buf, ch)
+	timeoutch = time.NewTimer(q.options.InputTimeOut << 1).C
+	for {
+		select {
+		case answer := <-ch:
+			return answer
+		case <-timeoutch:
+			return false
+		}
+	}
+}
+
+// InsertFile appends file to queue. After processing content of the file if result of the execution of the worker is
+// successful file will deleted.
+func (q *Queue) InsertFile(fileName string) bool {
+	var prefix [8]byte
+	binary.LittleEndian.PutUint64(prefix[:], magicNumberIsFile)
+	buf := []byte(string(prefix[:]) + fileName)
 	if q.options.InputTimeOut == 0 {
 		return q.insert(buf, nil)
 	}
@@ -214,7 +259,23 @@ forloop:
 	for len(q.workers) > 0 {
 		worker := <-q.workers
 		if q.inProcess.messagesInProcess(worker.GetID()) > 0 {
-			go worker.ProcessTimeout(q, q.tmpworkers)
+			go func() {
+				worker := worker
+				r := worker.ProcessTimeout()
+				switch r {
+				case ProcessedSuccessful:
+					q.process(worker.GetID(), true)
+				case ProcessedWithError:
+					q.process(worker.GetID(), false)
+				case ProcessedKillWorker:
+					q.dropWorker(worker.GetID())
+					worker.Close()
+					return
+				default:
+				}
+				q.tmpworkers <- worker
+				q.log.Trace("[Q:%s] [W:%d] Worker ready for work", q.name, worker.GetID())
+			}()
 		} else {
 			q.tmpworkers <- worker
 		}
@@ -242,11 +303,6 @@ forloop2:
 	}
 	q.workers, q.tmpworkers = q.tmpworkers, q.workers
 
-	// Process garbage collection here
-	if time.Since(startTime)-q.lastTimeGC > time.Minute {
-		go q.storage.garbageCollect()
-		q.lastTimeGC = time.Since(startTime)
-	}
 }
 
 func (q *Queue) loop() {
@@ -266,28 +322,60 @@ gofor:
 				//		q.log.Trace("[Q:%s]New message was received or timeout expired. Start reading messages", q.name)
 				AvailableWorker = q.workers
 			}
-			if len(q.workers) == 0 && q.totalWorkers < MaxWorkers {
-				tmp := q.factory.CreateWorker()
-				q.workers <- tmp
-				q.totalWorkers++
-				q.log.Trace("[Q:%s] New reader (%d) was created  Current count is %d ", q.name, tmp.GetID(), q.totalWorkers)
+			if q.factory.CanCreateWorkers() && len(q.workers) == 0 && uint16(q.totalWorkers) < MaxWorkers {
+				tmp, err := q.factory.CreateWorker()
+				if err == nil {
+					q.workers <- tmp
+					q.totalWorkers++
+					q.log.Trace("[Q:%s] [W:%d] New worker was created  Current count is %d ", q.name, tmp.GetID(), q.totalWorkers)
+				} else {
+					q.log.Error("[Q:%s] New worker was created with error %s ", q.name, err.Error())
+				}
 			}
 			to = nil
 		case worker := <-AvailableWorker:
 			inProcessItem := q.inProcess.addToList(worker.GetID())
 			if inProcessItem == nil {
-				go worker.ProcessTimeout(q, q.workers)
+				go func() {
+					worker := worker
+					r := worker.ProcessTimeout()
+					switch r {
+					case ProcessedSuccessful:
+						q.process(worker.GetID(), true)
+					case ProcessedWithError:
+						q.process(worker.GetID(), false)
+					case ProcessedKillWorker:
+						q.dropWorker(worker.GetID())
+						worker.Close()
+						return
+					default:
+					}
+					q.workers <- worker
+					q.log.Trace("[Q:%s] [W:%d] Worker ready for work", q.name, worker.GetID())
+				}()
 				continue
 			}
 			item, err := q.getOneItemFromStorage()
 			if err == nil {
-				inProcessItem[0] = workeridx{
-					idx:     item.idx,
-					storage: item.storage,
-					ID:      item.ID,
-				}
-				q.log.Trace("[Q:%s:%d] Loaded from %s and sent to worker (%d)", q.name, item.ID, item.storage.description(), worker.GetID())
-				go worker.ProcessMessage(q, item, q.workers)
+				inProcessItem[0] = item
+				q.log.Trace("[Q:%s] [W:%d] [M:%d] Loaded from %s and sent to worker", q.name, worker.GetID(), item.ID, item.storage.description())
+				go func() {
+					worker := worker
+					r := worker.ProcessMessage(item)
+					switch r {
+					case ProcessedSuccessful:
+						q.process(worker.GetID(), true)
+					case ProcessedWithError:
+						q.process(worker.GetID(), false)
+					case ProcessedKillWorker:
+						q.dropWorker(worker.GetID())
+						worker.Close()
+						return
+					default:
+					}
+					q.workers <- worker
+					q.log.Trace("[Q:%s] [W:%d] Worker ready for work", q.name, worker.GetID())
+				}()
 				MC = 1
 				continue
 			}
@@ -329,6 +417,8 @@ gofor:
 					q.log.Trace("[Q:%s] Idle ", q.name)
 					if MC == 1 {
 						MC += 2
+						go q.storage.garbageCollect()
+						q.log.Trace("[Q:%s] GC was started", q.name)
 					} else {
 						MC += 3
 					}
@@ -348,6 +438,7 @@ func (q *Queue) close() {
 	for w := range q.workers {
 		w.Close()
 	}
+	q.factory.Close()
 	q.memory.Close()
 	q.storage.Close()
 

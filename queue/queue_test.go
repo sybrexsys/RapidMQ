@@ -1,7 +1,9 @@
 package queue
 
 import (
+	"io"
 	"math/rand"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -34,18 +36,28 @@ type nullWorkerTestUnitFactory struct {
 	isTimeOut        bool
 }
 
-func (n *nullWorkerTestUnitFactory) CreateWorker() Worker {
+func (n *nullWorkerTestUnitFactory) CreateWorker() (Worker, error) {
 	return &nullWorkerTestUnit{
 		id:               WorkerID(atomic.AddUint64((*uint64)(&n.id), 1) - 1),
 		changeStateCount: n.changeStateCount,
 		delay:            n.delay,
 		state:            n.state,
 		isTimeOut:        n.isTimeOut,
-	}
+	}, nil
 }
 
 func (n *nullWorkerTestUnitFactory) NeedTimeoutProcessing() bool {
 	return n.isTimeOut
+}
+
+func (n *nullWorkerTestUnitFactory) CanCreateWorkers() bool {
+	return true
+}
+
+func (n *nullWorkerTestUnitFactory) Close() {
+}
+
+func (n *nullWorkerTestUnit) Close() {
 }
 
 func (n *nullWorkerTestUnit) isOk() bool {
@@ -71,32 +83,29 @@ func (n *nullWorkerTestUnit) isOk() bool {
 	return true
 }
 
-func (n *nullWorkerTestUnit) ProcessMessage(q *Queue, msg *Message, Next chan Worker) {
+func (n *nullWorkerTestUnit) ProcessMessage(msg *QueueItem) int {
 	time.Sleep(n.delay)
-	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 	if !n.isTimeOut {
-		q.Process(ID, n.isOk())
+		if n.isOk() {
+			return ProcessedSuccessful
+		}
+		return ProcessedWithError
 	}
-	Next <- n
-	q.log.Trace("[Q:%s] Worker (%d) ready for work", q.name, ID)
+	return ProcessedWaitNext
 }
 
-func (n *nullWorkerTestUnit) ProcessTimeout(q *Queue, Next chan Worker) {
-	ID := WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
-	q.Process(ID, n.isOk())
-	Next <- n
-	q.log.Trace("[Q:%s] Worker (%d) ready for work", q.name, ID)
+func (n *nullWorkerTestUnit) ProcessTimeout() int {
+	if n.isOk() {
+		return ProcessedSuccessful
+	}
+	return ProcessedWithError
 }
 
 func (n *nullWorkerTestUnit) GetID() WorkerID {
 	return WorkerID(atomic.AddUint64((*uint64)(&n.id), 0))
 }
 
-func (n *nullWorkerTestUnit) Close() {
-
-}
-
-func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, withLoging bool) bool {
+func WorkOptions(t *testing.T, Step int, kk int64, opt *Options, factory WorkerFactory, withLoging bool) bool {
 	var (
 		log *logging.Logger
 		err error
@@ -115,6 +124,7 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, wi
 	if err != nil {
 		t.Fatalf("Cannot create storage: %s", err)
 	}
+	totsize := uint64(0)
 	tot := uint64(0)
 	var m sync.Mutex
 	var wg sync.WaitGroup
@@ -125,6 +135,7 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, wi
 			for j := int64(0); j < kk; j++ {
 				tmp := make([]byte, rand.Intn(0x3fff))
 				m.Lock()
+				totsize += uint64(len(tmp))
 				wrk := tot
 				tot++
 				m.Unlock()
@@ -142,7 +153,7 @@ func WorkOptions(t *testing.T, kk int64, opt *Options, factory WorkerFactory, wi
 	for range picker.C {
 		d++
 		if d == 500 {
-			t.Errorf("Not finished in %s...\n", time.Since(start))
+			t.Errorf("Step %v Not finished in %s...\n", Step, time.Since(start))
 			isOk = false
 			break
 		}
@@ -268,11 +279,177 @@ func TestQueue(t *testing.T) {
 		},
 	}
 
-	for _, k := range tests {
-		if !WorkOptions(t, k.kk, &k.options, k.factory, k.logging) {
+	for s, k := range tests {
+		if !WorkOptions(t, s, k.kk, &k.options, k.factory, k.logging) {
 			break
 		}
 
 	}
+
+}
+
+const fileCount = 50
+
+type z struct {
+	i int
+}
+
+func BenchmarkMapInside(b *testing.B) {
+	RecCount := b.N
+	m := make(map[StorageIdx]struct{}, fileCount)
+	for i := StorageIdx(0); i < fileCount; i++ {
+		m[i] = struct{}{}
+	}
+	mem := make([]StorageIdx, RecCount)
+	for k := 0; k < RecCount; k++ {
+		mem[k] = StorageIdx(rand.Int31n(fileCount))
+	}
+
+	check := make(map[StorageIdx]*z)
+	for kk := range m {
+		check[kk] = &z{i: 0}
+	}
+	for k := 0; k < RecCount; k++ {
+		idx := mem[k]
+		op := check[idx]
+		op.i++
+	}
+}
+
+func BenchmarkMapOutside(b *testing.B) {
+	RecCount := b.N
+	m := make(map[StorageIdx]struct{}, fileCount)
+	for i := StorageIdx(0); i < fileCount; i++ {
+		m[i] = struct{}{}
+	}
+	mem := make([]StorageIdx, RecCount)
+	for k := 0; k < RecCount; k++ {
+		mem[k] = StorageIdx(rand.Int31n(fileCount))
+	}
+
+	check := make(map[StorageIdx]*z)
+	for kk := range m {
+		check[kk] = &z{i: 0}
+	}
+	for kk := range check {
+		cnt := 0
+		for k := 0; k < RecCount; k++ {
+			if mem[k] == kk {
+				cnt++
+			}
+		}
+		check[kk].i = cnt
+	}
+}
+
+func TestGCQueue(t *testing.T) {
+	clearTestFolder()
+	log, err := logging.CreateLog(logFolder+"logfile.log", 1024*1024*200, 255)
+	if err != nil {
+		t.Fatalf("Cannot create logging file: %s", err)
+	}
+	q, err := CreateQueue("Test", TestFolder, log, &nullWorkerFactory{}, nil)
+	if err != nil {
+		t.Fatalf("Cannot create storage: %s", err)
+	}
+	tmp := make([]byte, rand.Intn(0x3fff))
+	saved := q.Insert(tmp)
+	if !saved {
+		t.Fatalf("Cannot insert date")
+	}
+	time.Sleep(11 * time.Second)
+	_, err1 := os.Stat(TestFolder + "stg00000.dat")
+	if err1 == nil {
+		t.Fatalf("Dat file must me deleted")
+	}
+	q.Close()
+	if log != nil {
+		log.Close()
+	}
+}
+
+type TestWorker struct {
+	id WorkerID
+}
+
+type TestWorkerFactory struct {
+	id WorkerID
+}
+
+func (n *TestWorkerFactory) CreateWorker() (Worker, error) {
+	return &TestWorker{
+		id: WorkerID(atomic.AddUint64((*uint64)(&n.id), 1) - 1),
+	}, nil
+}
+
+func (n *TestWorkerFactory) CanCreateWorkers() bool {
+	return true
+}
+
+func (n *TestWorkerFactory) NeedTimeoutProcessing() bool {
+	return false
+}
+
+func (n *TestWorkerFactory) Close() {
+}
+
+func (n *TestWorker) ProcessMessage(msg *QueueItem) int {
+	start, _ := msg.Stream.Seek(0, io.SeekCurrent)
+	size, _ := msg.Stream.Seek(0, io.SeekEnd)
+	size -= start
+	msg.Stream.Seek(start, io.SeekStart)
+	buf := make([]byte, size)
+	msg.Stream.Read(buf)
+	if string(buf) != "error" {
+		return ProcessedSuccessful
+	}
+	return ProcessedWithError
+}
+
+func (n *TestWorker) ProcessTimeout() int {
+	return ProcessedSuccessful
+}
+
+func (n *TestWorker) GetID() WorkerID {
+	return n.id
+}
+
+func (n *TestWorker) Close() {
+}
+
+func TestErrorOnChangeFromMemoryToDisk(t *testing.T) {
+	clearTestFolder()
+	log, err := logging.CreateLog(logFolder+"logfile.log", 1024*1024*200, 255)
+	if err != nil {
+		t.Fatalf("Cannot create logging file: %s", err)
+	}
+	opt := DefaultQueueOptions
+	opt.InputTimeOut = 0
+	q, err := CreateQueue("Test", TestFolder, log, &TestWorkerFactory{}, &opt)
+	if err != nil {
+		t.Fatalf("Cannot create storage: %s", err)
+	}
+
+	tmp := make([]byte, 50000)
+	for i := 0; i < 2; i++ {
+		saved := q.Insert(tmp)
+		if !saved {
+			t.Fatalf("Cannot insert date")
+		}
+	}
+	saved := q.Insert([]byte("error"))
+	if !saved {
+		t.Fatalf("Cannot insert date")
+	}
+	for i := 0; i < 2; i++ {
+		saved := q.Insert(tmp)
+		if !saved {
+			t.Fatalf("Cannot insert date")
+		}
+	}
+	time.Sleep(2000 * time.Millisecond)
+	q.Close()
+	t.Log("Last\n")
+	log.Close()
 
 }

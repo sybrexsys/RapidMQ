@@ -106,7 +106,7 @@ func (fq *filequeue) putHandle(handle *fileWrite, err error) {
 func (fq *filequeue) canClear(idx StorageIdx) bool {
 	fq.memMutex.Lock()
 	defer fq.memMutex.Unlock()
-	fq.storage.log.Trace("[FSQ:%s] Received reques to delete {%d}", fq.storage.name, idx)
+	fq.storage.log.Trace("[FSQ:%s] Received request to delete {%d}", fq.storage.name, idx)
 	if _, ok := fq.state[idx]; !ok {
 		fq.storage.log.Error("[FSQ:%s] Not information about this file {%d}", fq.storage.name, idx)
 		return true
@@ -124,7 +124,7 @@ func (fq *filequeue) free() {
 	fq.state = nil
 }
 
-func (fq *filequeue) clear(idx StorageIdx) {
+func (fq *filequeue) clear() {
 	fq.memMutex.Lock()
 	defer fq.memMutex.Unlock()
 	close(fq.toOut)

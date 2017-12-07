@@ -81,7 +81,7 @@ func (fs *fileStorage) restoreStorageFile(FileIdx StorageIdx) (err error) {
 }
 
 // restoreIndexFile tries restore and repair index file of the storage
-func (fs *fileStorage) restoreIndexFile() (err error) {
+func (fs *fileStorage) restoreIndexFile() error {
 	IsOneFileProcessed := false
 	if err := fs.prepareIndexFile(); err != nil {
 		return err

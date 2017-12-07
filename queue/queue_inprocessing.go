@@ -1,6 +1,7 @@
 package queue
 
 import (
+	"os"
 	"sync"
 )
 
@@ -10,14 +11,8 @@ type storageProcessing interface {
 	description() string
 }
 
-type workeridx struct {
-	idx     StorageIdx
-	ID      StorageIdx
-	storage storageProcessing
-}
-
 type inProcessingList struct {
-	list []workeridx
+	list []*QueueItem
 	cnt  uint16
 }
 
@@ -36,13 +31,13 @@ func createInProcessing(q *Queue, workerCount, maxPerWorker uint16) *inProcessin
 	}
 }
 
-func (ipw *inProcessingPerWorker) addToList(worker WorkerID) []workeridx {
+func (ipw *inProcessingPerWorker) addToList(worker WorkerID) []*QueueItem {
 	ipw.RLock()
 	list, ok := ipw.workers[worker]
 	ipw.RUnlock()
 	if !ok {
 		list = &inProcessingList{
-			list: make([]workeridx, ipw.maxPerWorker),
+			list: make([]*QueueItem, ipw.maxPerWorker),
 		}
 		ipw.Lock()
 		ipw.workers[worker] = list
@@ -66,9 +61,9 @@ func (ipw *inProcessingPerWorker) decrementList(worker WorkerID) {
 }
 
 func (ipw *inProcessingPerWorker) processList(worker WorkerID, isOk bool) {
-	ipw.RLock()
+	ipw.Lock()
 	list, ok := ipw.workers[worker]
-	ipw.RUnlock()
+	ipw.Unlock()
 	if !ok {
 		ipw.q.log.Trace("[Q:%s] !!!Not records for (%d)", ipw.q.name, worker)
 		return
@@ -77,6 +72,11 @@ func (ipw *inProcessingPerWorker) processList(worker WorkerID, isOk bool) {
 		ipw.q.log.Trace("[Q:%s] !!!!Not records for (%d)", ipw.q.name, worker)
 	}
 	for i := uint16(0); i < list.cnt; i++ {
+		file, isFile := list.list[i].Stream.(*os.File)
+		if isFile {
+			file.Close()
+		}
+		list.list[i].Stream = nil
 		if isOk {
 			ipw.q.log.Trace("[Q:%s:%d] Delete message from %s", ipw.q.name, list.list[i].ID, list.list[i].storage.description())
 			list.list[i].storage.FreeRecord(list.list[i].idx)
